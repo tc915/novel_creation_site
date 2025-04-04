@@ -120,7 +120,7 @@ function FontSizeControl() {
              setInternalInputValue(''); // Clear if no editor
         }
     // Use marks as dependency to react to toolbar changes affecting selection marks
-    }, [editor, editor?.selection]);
+    }, [editor, editor?.selection, JSON.stringify(Editor.marks(editor))]);
 
     // Handle clicks outside
     useEffect(() => {
