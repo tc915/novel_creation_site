@@ -1,0 +1,159 @@
+/* src/index.css */
+
+/* --- Add Google Font Imports --- */
+@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Source+Code+Pro:wght@400&family=Lato:ital,wght@0,400;0,700;1,400&family=Merriweather:ital,wght@0,400;0,700;1,400&family=Lora:ital,wght@0,400;0,700;1,400&family=EB+Garamond:ital@0;1&family=Open+Sans:ital,wght@0,400;0,700;1,400&display=swap");
+/* --- End Font Imports --- */
+
+/* Import Tailwind v4 */
+@import "tailwindcss";
+
+/* Define custom theme values */
+@theme {
+  /* Cyberpunk Color Palette (Keep your colors from before) */
+  --color-cyber-bg: #0d1a2e;
+  --color-content-bg: #1a2b41;
+  --color-border: #4a5568;
+  --color-text-base: #cbd5e1;
+  --color-text-muted: #718096;
+  --color-neon-cyan: #00ffff;
+  --color-neon-pink: #ff00ff;
+  --color-neon-lime: #39ff14;
+  --color-accent-purple: #9f7aea;
+  --color-text-heading: var(--color-neon-cyan);
+
+  /* Shadows (Keep from before) */
+  --shadow-glow-cyan: 0 0 6px theme(colors.neon-cyan / 70%),
+    0 0 12px theme(colors.neon-cyan / 50%);
+  --shadow-glow-pink: 0 0 6px theme(colors.neon-pink / 70%),
+    0 0 12px theme(colors.neon-pink / 50%);
+  --shadow-glow-lime: 0 0 6px theme(colors.neon-lime / 70%),
+    0 0 12px theme(colors.neon-lime / 50%);
+
+  /* --- STEP 2: Define Font Families --- */
+  --font-display: "Orbitron", sans-serif; /* For headings and prominent text */
+  --font-body: "Open Sans", sans-serif; /* Using Orbitron also for body, or choose another like 'Exo' */
+  --font-mono: "Source Code Pro", monospace; /* For code/monospace sections */
+}
+
+/* --- STEP 3: Apply Base Font Styles --- */
+body {
+  /* Apply the chosen body font */
+  @apply bg-[var(--color-cyber-bg)] text-[var(--color-text-base)] font-[var(--font-body)];
+}
+
+/* Optionally apply display font to headings globally */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-display);
+  @apply font-[var(--font-display)]; /* Use display font, ensure weight */
+}
+
+/* Ensure elements using font-mono class get the right variable */
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* --- Keep other styles like scrollbars, inputs, buttons --- */
+
+/* Style scrollbars (Optional, WebKit) */
+/* ... (scrollbar styles from previous step) ... */
+
+/* Base styles for form inputs */
+input[type="email"],
+input[type="password"],
+input[type="text"] {
+  @apply w-full px-3 py-2 bg-[var(--color-content-bg)] border border-[var(--color-border)] rounded text-[var(--color-text-base)] focus:outline-none placeholder:text-[var(--color-text-muted)];
+  @apply focus:ring-2 focus:ring-[var(--color-neon-cyan)] focus:border-transparent;
+  font-family: var(--font-body); /* Ensure inputs use body font */
+}
+label {
+  font-family: var(--font-mono); /* Make labels monospace */
+  @apply text-sm;
+}
+
+/* Base styles for primary buttons */
+.btn-primary-cyan,
+.btn-primary-pink {
+  font-family: var(--font-display); /* Use display font for buttons */
+  @apply font-semibold rounded transition duration-200;
+}
+.btn-primary-cyan {
+  @apply bg-[var(--color-neon-cyan)] text-black hover:shadow-[var(--shadow-glow-cyan)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--color-cyber-bg)] focus:ring-[var(--color-neon-cyan)];
+}
+.btn-primary-pink {
+  @apply bg-[var(--color-neon-pink)] text-black hover:shadow-[var(--shadow-glow-pink)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--color-cyber-bg)] focus:ring-[var(--color-neon-pink)];
+}
+
+/* Specific overrides if needed */
+.font-mono {
+  font-family: var(--font-mono) !important; /* Ensure mono overrides */
+}
+
+[data-slate-placeholder="true"]::before {
+  /* Target the ::before pseudo-element Slate uses */
+  content: attr(data-placeholder); /* Use content attribute */
+  @apply text-[var(--color-text-muted)] opacity-75 not-italic font-normal;
+  /* Removed position: absolute */
+  /* Removed pointer-events: none (handled by ::before) */
+  /* Removed display: block !important */
+  /* Add position relative if needed for specific layouts, but often not required */
+  display: block; /* Ensure it takes space */
+  width: 100%; /* Take available width */
+  position: absolute; /* Re-adding: often needed to overlay correctly */
+  pointer-events: none; /* Still needed */
+}
+/* Reset content for non-placeholder state - might not be needed */
+/* [data-slate-editor="true"]:not([data-slate-placeholder="true"])::before {
+      content: none;
+  } */
+/* --- End Placeholder Styling --- */
+
+/* --- Add styles to hide number input spinners --- */
+/* Hide spin buttons on Chrome, Safari, Edge, Opera */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* Hide spin buttons on Firefox */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: inherit;
+}
+/* --- End number input spinner styles --- */
+
+/* --- Enhanced Scrollbar Styling (WebKit) --- */
+/* The scrollbar track (the background) */
+::-webkit-scrollbar {
+  width: 10px; /* Slightly wider */
+  height: 10px;
+}
+
+/* The track portion */
+::-webkit-scrollbar-track {
+  background: var(--color-content-bg); /* Use a dark content background */
+  border-radius: 5px;
+}
+
+/* The draggable scrolling handle */
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-border); /* Use the border color */
+  border-radius: 5px;
+  border: 2px solid var(--color-content-bg); /* Create a small border around thumb */
+}
+
+/* Handle on hover */
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-neon-cyan); /* Use neon cyan on hover */
+  border-color: var(--color-neon-cyan); /* Match border on hover */
+}
+
+/* Optional: Style the corner where vertical and horizontal scrollbars meet */
+::-webkit-scrollbar-corner {
+  background: var(--color-content-bg);
+}
+/* --- End Scrollbar Styling --- */
