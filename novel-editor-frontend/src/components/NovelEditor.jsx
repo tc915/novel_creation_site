@@ -95,6 +95,7 @@ const getCurrentMarkValue = (editor, format, defaultValue) => {
 };
 
 
+
 function NovelEditor() {
   const editor = useMemo(() => withReact(createEditor()), []);
   const [value, setValue] = useState(initialValue);
@@ -143,6 +144,11 @@ function NovelEditor() {
   // Keep dependencies empty if helpers are stable (defined outside or useCallback with no deps)
   }, []);
 
+  
+  const handleChange = useCallback(newValue => {
+    setValue(newValue);
+  }, []);
+
 
   return (
     // Outer container uses flex-col to position toolbar above editor area
@@ -150,7 +156,7 @@ function NovelEditor() {
       <Slate
           editor={editor}
           initialValue={value} // Bind state
-          onChange={newValue => setValue(newValue)} // Update state on change
+          onChange={handleChange} // Update state on change
       >
         {/* Toolbar remains static (non-sticky) at the top of this component */}
         <EditorToolbar />
