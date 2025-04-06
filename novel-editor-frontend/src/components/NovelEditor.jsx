@@ -1,17 +1,64 @@
-// src/components/NovelEditor.jsx
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+// ---> FILE: ./novel-editor-frontend/src/components/NovelEditor.jsx <---
+
+import React, {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef
+} from 'react';
+// ---> CHANGE START <---
+// Remove unused imports if manual reset is gone
 import { createEditor, Editor, Transforms, Text, Range, Node } from 'slate';
+// ---> CHANGE END <---
 import { Slate, Editable, withReact, ReactEditor } from 'slate-react';
-import EditorToolbar from './EditorToolbar'; // Adjust path if needed
+import EditorToolbar from './EditorToolbar';
+import SaveConfirmationPopup from './SaveConfirmationPopup';
+import {
+  DEFAULT_FONT_FAMILY,
+  DEFAULT_FONT_SIZE_STR,
+  MIN_FONT_SIZE,
+  MAX_FONT_SIZE,
+  DEFAULT_COLOR
+} from '../utils/slateEditorUtils';
 
-// Default values matching utils/constants or parent state
-const DEFAULT_FONT_SIZE_STR = '16px';
-const DEFAULT_FONT_FAMILY = 'Open Sans'; // Match index.css --font-body
-const DEFAULT_COLOR = '#CBD5E1'; // Match --color-text-base
-const MIN_FONT_SIZE = 10;
-const MAX_FONT_SIZE = 75;
-
-// --- RENDERERS ---
+// Leaf and Element Renderers (Keep as is from previous step)
+const Leaf = React.memo(
+  ({ attributes, children, leaf, novelDefaults = {} }) => {
+    let styles = {};
+    if (!leaf.fontFamily) {
+      styles.fontFamily =
+        novelDefaults.fontFamily || `var(--font-body, ${DEFAULT_FONT_FAMILY})`;
+    }
+    if (!leaf.fontSize) {
+      styles.fontSize = novelDefaults.fontSize || DEFAULT_FONT_SIZE_STR;
+    }
+    if (leaf.bold) {
+      children = <strong>{children}</strong>;
+    }
+    if (leaf.italic) {
+      children = <em>{children}</em>;
+    }
+    if (leaf.fontSize) {
+      styles.fontSize = leaf.fontSize;
+    }
+    if (leaf.color) {
+      styles.color = leaf.color;
+    }
+    if (leaf.fontFamily) {
+      styles.fontFamily = leaf.fontFamily;
+    }
+    if (Object.keys(styles).length > 0) {
+      return (
+        <span {...attributes} style={styles}>
+          {children}
+        </span>
+      );
+    }
+    return <span {...attributes}>{children}</span>;
+  }
+);
+Leaf.displayName = 'LeafRenderer';
 const Element = React.memo(({ attributes, children, element }) => {
   const baseClasses =
     'prose prose-sm prose-invert max-w-none font-[var(--font-body)] text-[var(--color-text-base)]';
@@ -61,36 +108,7 @@ const Element = React.memo(({ attributes, children, element }) => {
       );
   }
 });
-Element.displayName = 'ElementRenderer'; // Add display name for debugging
-
-const Leaf = React.memo(({ attributes, children, leaf }) => {
-  let styles = {};
-  if (leaf.bold) {
-    children = <strong>{children}</strong>;
-  }
-  if (leaf.italic) {
-    children = <em>{children}</em>;
-  }
-  if (leaf.fontSize) {
-    styles.fontSize = leaf.fontSize;
-  }
-  if (leaf.color) {
-    styles.color = leaf.color;
-  }
-  // Apply custom font family or fallback to default CSS variable
-  styles.fontFamily =
-    leaf.fontFamily || `var(--font-body, ${DEFAULT_FONT_FAMILY})`; // Added fallback font
-
-  if (Object.keys(styles).length > 0) {
-    return (
-      <span {...attributes} style={styles}>
-        {children}
-      </span>
-    );
-  }
-  return <span {...attributes}>{children}</span>;
-});
-Leaf.displayName = 'LeafRenderer'; // Add display name for debugging
+Element.displayName = 'ElementRenderer';
 // --- END RENDERERS ---
 
 // --- MAIN EDITOR COMPONENT ---
@@ -102,195 +120,188 @@ function NovelEditor({
   onContentChange,
   onSave,
   isSaving,
-  stickyFormat,
-  updateStickyFormat
+  novelDefaults,
+  onNovelDefaultsChange
 }) {
+  // ---> CHANGE START <---
+  // Revert editor creation: Let the key prop handle instance per chapter
   const editor = useMemo(() => withReact(createEditor()), [chapterId]);
+  // State now directly uses initialContent, will be reset by key change
   const [value, setValue] = useState(initialContent);
+  // ---> CHANGE END <---
 
-  // Effect to reset local value and apply sticky format when chapter changes
+  const [showSavePopup, setShowSavePopup] = useState(false);
+  const [savePopupMessage, setSavePopupMessage] = useState('');
+  const prevIsSaving = useRef(isSaving);
+
+  // ---> CHANGE START <---
+  // Effect to synchronize internal state 'value' if initialContent prop changes
+  // This covers cases where the parent might force an update without changing chapterId
   useEffect(() => {
-    setValue(initialContent);
-    // Apply sticky format to editor.marks when chapter loads/changes
-    // Use setTimeout to ensure editor is ready
-    setTimeout(() => {
-      if (editor && stickyFormat) {
-        // Clear existing editor marks before applying sticky ones? Or merge? Merge seems better.
-        editor.marks = { ...stickyFormat };
-        console.log(
-          `Applied sticky format to editor.marks on chapter ${chapterId} load:`,
-          editor.marks
-        );
-      } else if (editor) {
-        // If no sticky format, ensure editor marks are clear
-        editor.marks = {};
-      }
-    }, 0);
-  }, [initialContent, editor, chapterId, stickyFormat]); // Dependencies
+    // Basic check, might need deep comparison if objects are complex but reference differs
+    if (initialContent !== value) {
+      console.log(
+        'NovelEditor: Syncing value state with new initialContent prop.'
+      );
+      setValue(initialContent);
+    }
+  }, [initialContent]); // Only depends on initialContent now
 
+  // Remove the manual reset useEffect and the isContentLoaded ref
+  // useEffect(() => { /* ... manual reset logic ... */ }, [chapterId, initialContent, editor]);
+  // useEffect(() => { isContentLoaded.current = false; }, [chapterId]);
+  // ---> CHANGE END <---
+
+  // Effect to show popup when saving completes successfully
+  useEffect(() => {
+    if (prevIsSaving.current && !isSaving) {
+      console.log('Saving transition detected: true -> false');
+      setSavePopupMessage(`Chapter "${title || 'Untitled'}" saved!`);
+      setShowSavePopup(true);
+    }
+    prevIsSaving.current = isSaving;
+  }, [isSaving, title]);
+
+  // Pass novelDefaults to the Leaf renderer
+  const renderLeaf = useCallback(
+    (props) => <Leaf {...props} novelDefaults={novelDefaults} />,
+    [novelDefaults]
+  );
   const renderElement = useCallback((props) => <Element {...props} />, []);
-  const renderLeaf = useCallback((props) => <Leaf {...props} />, []);
 
   // Update local value, propagate content change
   const handleChange = useCallback(
     (newValue) => {
-      // Prevent updates if the content hasn't actually changed (deep comparison might be slow)
-      // Basic check:
       if (newValue === value) return;
-
       setValue(newValue);
       onContentChange(newValue);
-
-      // Attempt to re-apply sticky format if selection collapses without typing
-      // This is experimental and might need adjustment
-      if (editor.selection && Range.isCollapsed(editor.selection)) {
-        const currentMarks = editor.marks || {};
-        // Only update if editor marks don't match sticky format
-        if (
-          JSON.stringify(currentMarks) !== JSON.stringify(stickyFormat || {})
-        ) {
-          editor.marks = { ...stickyFormat };
-          // console.log("Synced editor.marks with stickyFormat on change (collapsed selection)");
-        }
-      }
     },
-    [onContentChange, editor, stickyFormat, value]
-  ); // Add value dependency
+    [onContentChange, value]
+  );
 
-  // --- Keyboard shortcut handler ---
+  // Keyboard shortcut handler (no changes needed here)
   const handleKeyDown = useCallback(
     (event) => {
       if (!editor) return;
       const isModKey = event.ctrlKey || event.metaKey;
-      if (!isModKey) return;
-
-      // Helpers for shortcuts
-      const toggleStickyMark = (format) => {
-        const currentStickyValue = !!stickyFormat?.[format];
-        const willBeActive = !currentStickyValue;
-        // Update sticky state via parent
-        updateStickyFormat(format, willBeActive ? true : null); // Use null to remove from sticky
-        // Also apply immediately to current selection if any
-        if (editor.selection) {
-          if (willBeActive) Editor.addMark(editor, format, true);
-          else Editor.removeMark(editor, format);
-        } else {
-          // If no selection, just update editor.marks (pending marks)
-          editor.marks = editor.marks || {};
-          if (willBeActive) editor.marks[format] = true;
-          else delete editor.marks[format];
+      // Ctrl+S Save Shortcut
+      if (isModKey && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        console.log('Ctrl+S pressed, calling onSave...');
+        if (onSave && !isSaving) {
+          onSave();
         }
-      };
-
-      const applyStickyFontSize = (newSizeNum) => {
-        const newSizeStr = `${newSizeNum}px`;
-        const newStickyValue =
-          newSizeStr === DEFAULT_FONT_SIZE_STR ? null : newSizeStr;
-        updateStickyFormat('fontSize', newStickyValue);
-        // Also apply immediately to current selection or editor.marks
-        if (editor.selection) {
-          Editor.removeMark(editor, 'fontSize');
-          if (newStickyValue)
-            Editor.addMark(editor, 'fontSize', newStickyValue);
-        } else {
-          editor.marks = editor.marks || {};
-          if (newStickyValue) editor.marks.fontSize = newStickyValue;
-          else delete editor.marks.fontSize;
-        }
-      };
-
-      switch (event.key.toLowerCase()) {
-        case 'b':
-          event.preventDefault();
-          toggleStickyMark('bold');
-          break;
-        case 'i':
-          event.preventDefault();
-          toggleStickyMark('italic');
-          break;
-        case ',':
-        case '<': {
-          event.preventDefault();
-          // Calculate based on current sticky or default
-          const currentSizeStr =
-            stickyFormat?.fontSize || DEFAULT_FONT_SIZE_STR;
-          let currentSizeNum = parseInt(currentSizeStr, 10) || 16;
-          const newSizeNum = Math.max(MIN_FONT_SIZE, currentSizeNum - 1);
-          applyStickyFontSize(newSizeNum);
-          break;
-        }
-        case '.':
-        case '>': {
+        return;
+      }
+      // Bold/Italic Toggles
+      if (isModKey && event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        const isActive = Editor.marks(editor)?.bold || false;
+        if (isActive) Editor.removeMark(editor, 'bold');
+        else Editor.addMark(editor, 'bold', true);
+        return;
+      }
+      if (isModKey && event.key.toLowerCase() === 'i') {
+        event.preventDefault();
+        const isActive = Editor.marks(editor)?.italic || false;
+        if (isActive) Editor.removeMark(editor, 'italic');
+        else Editor.addMark(editor, 'italic', true);
+        return;
+      }
+      // Novel Default Font Size Shortcuts
+      if (onNovelDefaultsChange) {
+        if (
+          isModKey &&
+          (event.key === ',' ||
+            event.key === '<' ||
+            event.key === '.' ||
+            event.key === '>')
+        ) {
           event.preventDefault();
           const currentSizeStr =
-            stickyFormat?.fontSize || DEFAULT_FONT_SIZE_STR;
-          let currentSizeNum = parseInt(currentSizeStr, 10) || 16;
-          const newSizeNum = Math.min(MAX_FONT_SIZE, currentSizeNum + 1);
-          applyStickyFontSize(newSizeNum);
-          break;
+            novelDefaults?.fontSize || DEFAULT_FONT_SIZE_STR;
+          let currentSizeNum =
+            parseInt(currentSizeStr, 10) || DEFAULT_FONT_SIZE_NUM;
+          let newSizeNum;
+          if (event.key === ',' || event.key === '<') {
+            newSizeNum = Math.max(MIN_FONT_SIZE, currentSizeNum - 1);
+          } else {
+            newSizeNum = Math.min(MAX_FONT_SIZE, currentSizeNum + 1);
+          }
+          if (newSizeNum !== currentSizeNum) {
+            onNovelDefaultsChange('fontSize', `${newSizeNum}px`);
+          }
+          return;
         }
-        // Add other shortcuts as needed
       }
     },
-    [editor, stickyFormat, updateStickyFormat]
+    [editor, novelDefaults, onNovelDefaultsChange, onSave, isSaving]
+  );
+
+  // Calculate styles for the Editable component (no changes needed)
+  const editorStyle = useMemo(
+    () => ({
+      fontFamily:
+        novelDefaults?.fontFamily || `var(--font-body, ${DEFAULT_FONT_FAMILY})`,
+      fontSize: novelDefaults?.fontSize || DEFAULT_FONT_SIZE_STR
+    }),
+    [novelDefaults]
   );
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="relative flex flex-col h-full">
+      {/* ---> CHANGE START <--- */}
+      {/* Re-introduce key prop, use 'value' for controlled input */}
       <Slate
         editor={editor}
-        initialValue={value}
-        onChange={handleChange}
-        key={chapterId} // Force full component remount on chapter change
+        initialValue={value} // Use state for initial value
+        value={value} // Make it fully controlled
+        onChange={handleChange} // Use the existing handleChange
+        key={chapterId} // Re-add key to force remount on chapter change
       >
-        {/* Pass sticky state updater to Toolbar */}
+        {/* ---> CHANGE END <--- */}
         <EditorToolbar
-          updateStickyFormat={updateStickyFormat}
-          stickyFormat={stickyFormat}
+          novelDefaults={novelDefaults}
+          onNovelDefaultsChange={onNovelDefaultsChange}
         />
-
         <div className="flex-grow overflow-y-auto">
           <div className="p-6 md:p-8 max-w-[90%] mx-auto">
-            {/* Chapter Title Input */}
             <input
               type="text"
               value={title}
               onChange={onTitleChange}
               placeholder="Chapter Title"
-              className="w-full bg-transparent text-3xl font-bold font-[var(--font-display)] text-[var(--color-text-heading)] mb-6 focus:outline-none border-b-2 border-transparent focus:border-[var(--color-neon-cyan)] transition duration-200 py-1" // Added padding
+              className="w-full bg-transparent text-3xl font-bold font-[var(--font-display)] text-[var(--color-text-heading)] mb-6 focus:outline-none border-b-2 border-transparent focus:border-[var(--color-neon-cyan)] transition duration-200 py-1"
             />
 
-            {/* Save Button */}
             <button
               onClick={onSave}
               disabled={isSaving}
               className="fixed bottom-6 right-6 btn-primary-cyan px-6 py-2 z-50 shadow-lg disabled:opacity-50 flex items-center space-x-2"
-              title="Save Chapter (Ctrl+S not implemented)"
+              title="Save Chapter (Ctrl+S)"
             >
-              {isSaving && <SpinnerIcon />} {/* Add spinner icon */}
+              {isSaving && <SpinnerIcon />}
               <span>{isSaving ? 'Saving...' : 'Save Chapter'}</span>
             </button>
 
-            {/* Slate Editable Area */}
             <Editable
               renderElement={renderElement}
               renderLeaf={renderLeaf}
               placeholder="Start writing this chapter..."
-              className="outline-none min-h-[60vh]" // Increased min height
+              className="outline-none min-h-[60vh]"
               onKeyDown={handleKeyDown}
               spellCheck
-              autoFocus
-              // --- Re-apply sticky format on selection change ---
-              // If selection collapses (no range), make sure editor.marks matches sticky
-              onSelect={() => {
-                if (editor.selection && Range.isCollapsed(editor.selection)) {
-                  editor.marks = { ...stickyFormat };
-                }
-              }}
+              style={editorStyle}
+              // autoFocus removed previously
             />
           </div>
         </div>
       </Slate>
+      <SaveConfirmationPopup
+        isVisible={showSavePopup}
+        message={savePopupMessage}
+        onClose={() => setShowSavePopup(false)}
+      />
     </div>
   );
 }
@@ -303,6 +314,7 @@ const SpinnerIcon = () => (
     fill="none"
     viewBox="0 0 24 24"
   >
+    {' '}
     <circle
       className="opacity-25"
       cx="12"
@@ -310,12 +322,12 @@ const SpinnerIcon = () => (
       r="10"
       stroke="currentColor"
       strokeWidth="4"
-    ></circle>
+    ></circle>{' '}
     <path
       className="opacity-75"
       fill="currentColor"
       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-    ></path>
+    ></path>{' '}
   </svg>
 );
 

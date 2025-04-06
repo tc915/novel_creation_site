@@ -1,88 +1,32 @@
-// src/pages/WorkspaceEditorPage.jsx
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom'; // Removed Link as it's not used directly here
+// ---> FILE: ./novel-editor-frontend/src/pages/WorkspaceEditorPage.jsx <---
+
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo
+} from 'react';
+import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import axios from 'axios';
-import { useAuth } from '../context/AuthContext'; // Adjust if needed
-import NovelEditor from '../components/NovelEditor'; // Adjust if needed
-import ConfirmModal from '../components/ConfirmModal'; // Adjust if needed
-import { DndProvider, useDrag, useDrop } from 'react-dnd'; // For Drag and Drop
-import { HTML5Backend } from 'react-dnd-html5-backend'; // For Drag and Drop
-import { debounce } from 'lodash'; // Import debounce
+import { useAuth } from '../context/AuthContext';
+import NovelEditor from '../components/NovelEditor';
+import ConfirmModal from '../components/ConfirmModal';
+// Removed DND imports
+import { debounce } from 'lodash';
 
-// Default values matching utils/constants
+import {
+  DEFAULT_FONT_FAMILY as NOVEL_DEFAULT_FONT_FAMILY,
+  DEFAULT_FONT_SIZE_STR as NOVEL_DEFAULT_FONT_SIZE
+} from '../utils/slateEditorUtils';
 const initialSlateValue = [{ type: 'paragraph', children: [{ text: '' }] }];
-const DEFAULT_FONT_SIZE_STR = '16px';
-const DEFAULT_FONT_FAMILY = 'Open Sans'; // Match index.css --font-body
-const DEFAULT_COLOR = '#CBD5E1'; // Match --color-text-base
 
-const backendUrl = 'http://localhost:5001'; // Use env var ideally
+const backendUrl = 'http://localhost:5001';
 
-// --- Draggable Chapter Item ---
-const ItemTypes = { CHAPTER: 'chapter' };
-
-const DraggableChapterLink = ({
-  chapter,
-  index,
-  moveChapter,
-  onSelect,
-  isActive,
-  onDelete
-}) => {
-  const ref = useRef(null);
-
-  const [{ isDragging }, drag] = useDrag(
-    () => ({
-      type: ItemTypes.CHAPTER,
-      item: { id: chapter._id, index }, // Pass ID and original index
-      collect: (monitor) => ({
-        isDragging: monitor.isDragging()
-      })
-    }),
-    [chapter._id, index]
-  ); // Dependencies
-
-  const [, drop] = useDrop(
-    () => ({
-      accept: ItemTypes.CHAPTER,
-      hover(item, monitor) {
-        // item is the dragged item { id, index }
-        if (!ref.current) return;
-
-        const dragIndex = item.index;
-        const hoverIndex = index;
-
-        // Don't replace items with themselves
-        if (dragIndex === hoverIndex) return;
-
-        // Determine rectangle on screen
-        const hoverBoundingRect = ref.current?.getBoundingClientRect();
-        // Get vertical middle
-        const hoverMiddleY =
-          (hoverBoundingRect.bottom - hoverBoundingRect.top) / 2;
-        // Determine mouse position
-        const clientOffset = monitor.getClientOffset();
-        // Get pixels to the top
-        const hoverClientY = clientOffset.y - hoverBoundingRect.top;
-
-        // Dragging downwards
-        if (dragIndex < hoverIndex && hoverClientY < hoverMiddleY) return;
-        // Dragging upwards
-        if (dragIndex > hoverIndex && hoverClientY > hoverMiddleY) return;
-
-        // Time to actually perform the action
-        moveChapter(dragIndex, hoverIndex); // Call the move function from parent
-        // Update the item's index for subsequent hover checks
-        item.index = hoverIndex;
-      }
-    }),
-    [index, moveChapter]
-  ); // Dependencies
-
-  drag(drop(ref)); // Attach drag and drop refs to the same node
-
+// --- Chapter Link Component (Simplified) ---
+const ChapterLink = ({ chapter, onSelect, isActive, onDelete }) => {
   return (
     <a
-      ref={ref} // Attach combined ref
       href="#"
       onClick={(e) => {
         e.preventDefault();
@@ -92,14 +36,12 @@ const DraggableChapterLink = ({
         isActive
           ? 'bg-[var(--color-content-bg)] text-[var(--color-neon-cyan)] font-semibold'
           : 'hover:bg-gray-800/50 hover:text-[var(--color-neon-cyan)]'
-      } ${isDragging ? 'opacity-30' : 'opacity-100'}`}
-      style={{ cursor: 'move' }} // Indicate draggable
-      data-handler-id={chapter._id} // For dnd-kit internals (if using that later)
+      }`}
     >
+      {' '}
       <span className="truncate flex-grow pr-2">
         {chapter.order + 1}. {chapter.title}
-      </span>
-      {/* Delete Button (shown on hover) */}
+      </span>{' '}
       <button
         onClick={(e) => {
           e.stopPropagation();
@@ -108,62 +50,121 @@ const DraggableChapterLink = ({
         className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded bg-gray-700/30 text-red-500 hover:bg-red-500 hover:text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
         title="Delete Chapter"
       >
-        <TrashIcon />
-      </button>
+        {' '}
+        <TrashIcon />{' '}
+      </button>{' '}
     </a>
   );
 };
-// --- End Draggable Chapter Item ---
 
 function WorkspaceEditorPage() {
   const { novelId } = useParams();
   const navigate = useNavigate();
   const { authState } = useAuth();
+  const { currentNovel, isLoadingNovel, updateCurrentNovelData, saveTrigger } =
+    useOutletContext();
+  // ---> CHANGE START <---
+  // Ref to track the last processed save trigger value
+  const processedSaveTriggerRef = useRef(0);
+  // ---> CHANGE END <---
 
   // State
-  const [chapters, setChapters] = useState([]); // List for sidebar
+  const [chapters, setChapters] = useState([]);
   const [currentChapterId, setCurrentChapterId] = useState(null);
   const [currentChapterTitle, setCurrentChapterTitle] = useState('');
   const [currentChapterContent, setCurrentChapterContent] =
     useState(initialSlateValue);
   const [isLoadingChapters, setIsLoadingChapters] = useState(true);
   const [isLoadingContent, setIsLoadingContent] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const [isSavingChapter, setIsSavingChapter] = useState(false);
+  const [isSavingNovel, setIsSavingNovel] = useState(false);
   const [error, setError] = useState('');
-  const [stickyFormat, setStickyFormat] = useState({}); // State for persistent formatting
+  const [novelDefaults, setNovelDefaults] = useState({
+    fontFamily: NOVEL_DEFAULT_FONT_FAMILY,
+    fontSize: NOVEL_DEFAULT_FONT_SIZE
+  });
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortOrder, setSortOrder] = useState('asc');
+
+  // Effect to update local defaults
+  useEffect(() => {
+    if (currentNovel) {
+      console.log('Current novel loaded in Editor Page:', currentNovel);
+      setNovelDefaults({
+        fontFamily: currentNovel.defaultFontFamily || NOVEL_DEFAULT_FONT_FAMILY,
+        fontSize: currentNovel.defaultFontSize || NOVEL_DEFAULT_FONT_SIZE
+      });
+    } else {
+      console.log('Current novel is null/undefined in Editor Page');
+      setNovelDefaults({
+        fontFamily: NOVEL_DEFAULT_FONT_FAMILY,
+        fontSize: NOVEL_DEFAULT_FONT_SIZE
+      });
+    }
+  }, [currentNovel]);
 
   // Modal State
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [chapterToDeleteId, setChapterToDeleteId] = useState(null);
   const [chapterToDeleteTitle, setChapterToDeleteTitle] = useState('');
 
-  // Ref to track previous chapter order for debouncing save
-  const prevChaptersRef = useRef([]);
-
-  // Update Sticky Format Callback
-  const updateStickyFormat = useCallback((format, value) => {
-    setStickyFormat((prev) => {
-      const newFormat = { ...prev };
-      // Check against default values to decide whether to keep or remove the mark
-      if (
-        value === null ||
-        value === false ||
-        (format === 'fontSize' && value === DEFAULT_FONT_SIZE_STR) ||
-        (format === 'fontFamily' && value === DEFAULT_FONT_FAMILY) ||
-        (format === 'color' &&
-          typeof value === 'string' &&
-          value.toUpperCase() === DEFAULT_COLOR.toUpperCase())
-      ) {
-        delete newFormat[format];
-      } else {
-        newFormat[format] = value;
+  // Debounced save novel defaults
+  const debouncedSaveNovelDefaults = useRef(
+    debounce(async (newDefaults) => {
+      if (!novelId || !authState.token) {
+        console.error('Cannot save novel defaults: missing novelId or token.');
+        return;
       }
-      console.log('Sticky format updated:', newFormat);
-      return newFormat;
-    });
-  }, []); // No dependencies, only uses default constants
+      setIsSavingNovel(true);
+      setError('');
+      console.log('Debounced save: Updating novel defaults with:', newDefaults);
+      const payload = {
+        defaultFontFamily: newDefaults.fontFamily,
+        defaultFontSize: newDefaults.fontSize
+      };
+      try {
+        const config = {
+          headers: { Authorization: `Bearer ${authState.token}` }
+        };
+        const response = await axios.put(
+          `${backendUrl}/api/novels/${novelId}`,
+          payload,
+          config
+        );
+        console.log('Novel defaults saved successfully.');
+        if (updateCurrentNovelData) {
+          updateCurrentNovelData(response.data);
+          console.log('Called updateCurrentNovelData from context.');
+        } else {
+          console.warn('updateCurrentNovelData function not found in context.');
+        }
+      } catch (err) {
+        console.error('Error saving novel defaults:', err);
+        setError(
+          err.response?.data?.message || 'Failed to save novel settings.'
+        );
+      } finally {
+        setIsSavingNovel(false);
+      }
+    }, 1500)
+  ).current;
 
-  // Load Specific Chapter Content
+  // Toolbar change handler
+  const handleNovelDefaultsChange = useCallback(
+    (format, value) => {
+      console.log(
+        `handleNovelDefaultsChange: format=${format}, value=${value}`
+      );
+      setNovelDefaults((prev) => {
+        const updatedDefaults = { ...prev, [format]: value };
+        debouncedSaveNovelDefaults(updatedDefaults);
+        return updatedDefaults;
+      });
+    },
+    [debouncedSaveNovelDefaults]
+  );
+
+  // Load Chapter
   const loadChapter = useCallback(
     async (chapterId) => {
       if (!chapterId || !authState.token) return;
@@ -186,8 +187,6 @@ function WorkspaceEditorPage() {
             ? content
             : initialSlateValue;
         setCurrentChapterContent(validContent);
-        // Optional: Reset sticky format when loading a chapter?
-        // setStickyFormat({});
       } catch (err) {
         console.error(`Error loading chapter ${chapterId}:`, err);
         setError(
@@ -201,14 +200,14 @@ function WorkspaceEditorPage() {
       }
     },
     [novelId, authState.token]
-  ); // Removed setStickyFormat dependency if not resetting
+  );
 
-  // Fetch Chapters List
+  // Fetch Chapters
   const fetchChapters = useCallback(async () => {
     if (!novelId || !authState.token) return;
     setIsLoadingChapters(true);
     setError('');
-    const currentSelectionId = currentChapterId; // Store current selection before fetch
+    const currentSelectionId = currentChapterId;
     try {
       const config = {
         headers: { Authorization: `Bearer ${authState.token}` }
@@ -218,24 +217,16 @@ function WorkspaceEditorPage() {
         config
       );
       const fetchedChapters = response.data || [];
+      fetchedChapters.sort((a, b) => a.order - b.order);
       setChapters(fetchedChapters);
-      prevChaptersRef.current = fetchedChapters; // Initialize prevChaptersRef
-
       const currentChapterStillExists = fetchedChapters.some(
         (chap) => chap._id === currentSelectionId
       );
-
       if (fetchedChapters.length > 0) {
-        if (!currentChapterStillExists) {
-          // Load first chapter if current one is gone or was null
-          loadChapter(fetchedChapters[0]._id);
-        } else if (!currentChapterId) {
-          // If there was no selection previously, load the first one
+        if (!currentChapterStillExists || !currentChapterId) {
           loadChapter(fetchedChapters[0]._id);
         }
-        // If currentChapterStillExists and currentChapterId was already set, do nothing to avoid reload
       } else {
-        // No chapters, clear editor
         setCurrentChapterId(null);
         setCurrentChapterTitle('');
         setCurrentChapterContent(initialSlateValue);
@@ -252,39 +243,39 @@ function WorkspaceEditorPage() {
     } finally {
       setIsLoadingChapters(false);
     }
-    // Add dependencies
   }, [novelId, authState.token, navigate, loadChapter, currentChapterId]);
 
-  // Initial Fetch Effect
+  // Initial Fetch
   useEffect(() => {
     fetchChapters();
   }, [fetchChapters]);
 
-  // Handle Chapter Selection
+  // Chapter Handlers
   const handleSelectChapter = (chapterId) => {
     if (chapterId !== currentChapterId) {
-      // TODO: Consider adding check for unsaved changes before switching
       loadChapter(chapterId);
     }
   };
-
-  // Handle Title Change in Editor
   const handleTitleChange = (e) => {
     setCurrentChapterTitle(e.target.value);
   };
-
-  // Handle Content Change in Editor
   const handleContentChange = useCallback((newContent) => {
     setCurrentChapterContent(newContent);
-  }, []); // No dependencies needed
+  }, []);
 
-  // Handle Save Chapter
-  const handleSaveChapter = async () => {
-    if (!currentChapterId || !authState.token) {
-      setError('No chapter selected or not authorized.');
+  // Save Chapter Handler
+  const handleSaveChapter = useCallback(async () => {
+    if (!currentChapterId || !authState.token || isSavingChapter) {
+      if (isSavingChapter)
+        console.log('Save Chapter prevented: Already saving.');
+      else
+        console.log(
+          'Save Chapter prevented: No chapter selected or not authorized.'
+        );
       return;
     }
-    setIsSaving(true);
+    console.log('handleSaveChapter triggered');
+    setIsSavingChapter(true);
     setError('');
     try {
       const config = {
@@ -296,43 +287,68 @@ function WorkspaceEditorPage() {
       };
       if (payload.title === '') {
         setError('Chapter title cannot be empty.');
-        setIsSaving(false);
+        setIsSavingChapter(false);
         return;
       }
-
       const response = await axios.put(
         `${backendUrl}/api/novels/${novelId}/chapters/${currentChapterId}`,
         payload,
         config
       );
-
-      // Update the title in the sidebar list
       setChapters((prevChapters) =>
-        prevChapters.map((chap) =>
-          chap._id === currentChapterId
-            ? {
-                ...chap,
-                title: response.data.title,
-                updatedAt: response.data.updatedAt
-              }
-            : chap
-        )
+        prevChapters
+          .map((chap) =>
+            chap._id === currentChapterId
+              ? {
+                  ...chap,
+                  title: response.data.title,
+                  updatedAt: response.data.updatedAt
+                }
+              : chap
+          )
+          .sort((a, b) => a.order - b.order)
       );
       console.log('Chapter saved successfully');
-      // Optionally: show success feedback
     } catch (err) {
       console.error(`Error saving chapter ${currentChapterId}:`, err);
       setError(err.response?.data?.message || 'Failed to save chapter.');
     } finally {
-      setIsSaving(false);
+      setIsSavingChapter(false);
     }
-  };
+  }, [
+    currentChapterId,
+    authState.token,
+    currentChapterTitle,
+    currentChapterContent,
+    novelId,
+    isSavingChapter
+  ]);
 
-  // Handle Create New Chapter
+  // Effect to listen for save trigger from layout
+  useEffect(() => {
+    // ---> CHANGE START <---
+    // Check if the trigger value from context is NEWER than the last processed one
+    if (saveTrigger > processedSaveTriggerRef.current) {
+      console.log(
+        `Save trigger received in WorkspaceEditorPage (Trigger: ${saveTrigger}, Processed: ${processedSaveTriggerRef.current})`
+      );
+      // Only save if there's actually a chapter loaded
+      if (currentChapterId) {
+        handleSaveChapter();
+      } else {
+        console.log('Save trigger received, but no chapter selected to save.');
+      }
+      // Update the ref to the current trigger value so we don't process it again
+      processedSaveTriggerRef.current = saveTrigger;
+    }
+    // ---> CHANGE END <---
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saveTrigger, handleSaveChapter, currentChapterId]); // Add currentChapterId dependency
+
+  // Create / Delete Chapter logic
   const handleCreateChapter = async () => {
     if (!novelId || !authState.token) return;
     setError('');
-    // Consider button loading state
     try {
       const config = {
         headers: { Authorization: `Bearer ${authState.token}` }
@@ -343,24 +359,21 @@ function WorkspaceEditorPage() {
         config
       );
       const newChapter = response.data;
-      // Add to list and automatically select it
-      setChapters((prevChapters) => [...prevChapters, newChapter]);
+      setChapters((prevChapters) =>
+        [...prevChapters, newChapter].sort((a, b) => a.order - b.order)
+      );
       loadChapter(newChapter._id);
     } catch (err) {
       console.error('Error creating chapter:', err);
       setError(err.response?.data?.message || 'Failed to create chapter.');
     }
   };
-
-  // Initiate Deletion (opens modal)
   const handleDeleteChapterClick = (id, title) => {
     setError('');
     setChapterToDeleteId(id);
     setChapterToDeleteTitle(title || 'Untitled Chapter');
     setShowConfirmModal(true);
   };
-
-  // Confirm Deletion (called by modal)
   const confirmChapterDeletion = async () => {
     setError('');
     if (!authState.token || !chapterToDeleteId) return;
@@ -368,8 +381,6 @@ function WorkspaceEditorPage() {
     setShowConfirmModal(false);
     setChapterToDeleteId(null);
     setChapterToDeleteTitle('');
-    // Consider delete loading state
-
     try {
       const config = {
         headers: { Authorization: `Bearer ${authState.token}` }
@@ -378,144 +389,83 @@ function WorkspaceEditorPage() {
         `${backendUrl}/api/novels/${novelId}/chapters/${chapterId}`,
         config
       );
-
       let nextChapterToLoadId = null;
-      let updatedChapters = [];
       setChapters((prevChapters) => {
-        const index = prevChapters.findIndex((c) => c._id === chapterId);
+        const chaptersBeforeDelete = [...prevChapters].sort(
+          (a, b) => a.order - b.order
+        );
+        const index = chaptersBeforeDelete.findIndex(
+          (c) => c._id === chapterId
+        );
         if (index === -1) return prevChapters;
-
-        // Determine next chapter to load
-        if (prevChapters.length > 1) {
+        if (chaptersBeforeDelete.length > 1) {
           nextChapterToLoadId =
             index > 0
-              ? prevChapters[index - 1]._id
-              : prevChapters[index + 1]._id;
+              ? chaptersBeforeDelete[index - 1]._id
+              : chaptersBeforeDelete[index + 1]._id;
         }
-        // Filter out the deleted chapter and update order locally for immediate UI feedback
-        updatedChapters = prevChapters
+        const updatedChapters = chaptersBeforeDelete
           .filter((c) => c._id !== chapterId)
-          .map((chap, idx) => ({ ...chap, order: idx }));
+          .sort((a, b) => a.order - b.order);
         return updatedChapters;
       });
-
-      // Load next/previous or clear editor
       if (nextChapterToLoadId) {
         loadChapter(nextChapterToLoadId);
       } else if (currentChapterId === chapterId) {
-        // If deleted was current and last
         setCurrentChapterId(null);
         setCurrentChapterTitle('');
         setCurrentChapterContent(initialSlateValue);
       }
-      // Update the ref for debouncer comparison
-      prevChaptersRef.current = updatedChapters;
-
       console.log(`Chapter ${chapterId} deleted successfully.`);
     } catch (err) {
       console.error(`Error deleting chapter ${chapterId}:`, err);
       setError(err.response?.data?.message || 'Failed to delete chapter.');
-    } finally {
-      // Reset delete state/loading
     }
   };
 
-  // --- Drag and Drop Logic ---
-  const moveChapter = useCallback((dragIndex, hoverIndex) => {
-    setChapters((prevChapters) => {
-      const newChapters = [...prevChapters];
-      const [draggedItem] = newChapters.splice(dragIndex, 1);
-      newChapters.splice(hoverIndex, 0, draggedItem);
-      // Local order update for UI feedback during drag
-      return newChapters.map((chap, idx) => ({ ...chap, order: idx }));
-    });
-    // Debounced save will be triggered by the useEffect below
-  }, []);
-
-  // API call to save reordered chapters
-  const saveChapterOrder = useCallback(
-    async (currentOrderedChapters) => {
-      if (!novelId || !authState.token || currentOrderedChapters.length === 0)
-        return;
-
-      const orderedChapterIds = currentOrderedChapters.map((chap) => chap._id);
-      // Avoid saving if the order hasn't actually changed from the ref
-      const previousOrderIds = prevChaptersRef.current.map((c) => c._id);
-      if (
-        JSON.stringify(orderedChapterIds) === JSON.stringify(previousOrderIds)
-      ) {
-        console.log("Order hasn't changed, skipping save.");
-        return;
-      }
-
-      setError('');
-      console.log('Attempting to save new chapter order:', orderedChapterIds);
-      // Add saving indicator?
-
-      try {
-        const config = {
-          headers: { Authorization: `Bearer ${authState.token}` }
-        };
-        await axios.post(
-          `${backendUrl}/api/novels/${novelId}/chapters/reorder`,
-          { orderedChapterIds },
-          config
-        );
-        console.log('Chapter order saved successfully on backend.');
-        // Update the ref *after* successful save
-        prevChaptersRef.current = currentOrderedChapters;
-        // Success: Trust local state, no re-fetch needed
-      } catch (err) {
-        console.error('Error saving chapter order:', err);
-        setError(
-          err.response?.data?.message ||
-            'Failed to save chapter order. Reverting.'
-        );
-        // Failure: Re-fetch to get server state
-        fetchChapters();
-      } finally {
-        // Clear saving indicator
-      }
-    },
-    [novelId, authState.token, fetchChapters]
-  ); // Include fetchChapters for error case
-
-  // Debounced Save Function - Use useRef to ensure stable debounce function
-  const debouncedSaveOrderRef = useRef(
-    debounce((orderedChapters) => {
-      saveChapterOrder(orderedChapters);
-    }, 1500) // Debounce API call (e.g., 1.5 seconds after last change)
-  );
-
-  // Effect to trigger debounced save when local chapter order changes
-  useEffect(() => {
-    // Check if the component is still loading chapters initially
-    if (isLoadingChapters) return;
-
-    // Compare current order with the ref's order
-    const currentOrderIds = chapters.map((c) => c._id);
-    const previousOrderIds = prevChaptersRef.current.map((c) => c._id);
-
-    if (JSON.stringify(currentOrderIds) !== JSON.stringify(previousOrderIds)) {
-      console.log('Chapter order changed locally, debouncing save...');
-      debouncedSaveOrderRef.current(chapters); // Pass the current chapters state
-      // Do NOT update prevChaptersRef here; update it only after successful save
+  // Displayed Chapters calculation
+  const displayChapters = useMemo(() => {
+    let filtered = [...chapters];
+    if (searchTerm.trim()) {
+      const lowerSearchTerm = searchTerm.toLowerCase();
+      filtered = filtered.filter(
+        (chapter) =>
+          chapter.title.toLowerCase().includes(lowerSearchTerm) ||
+          (chapter.order + 1).toString().includes(lowerSearchTerm)
+      );
     }
-    // Only depend on the chapters array identity/content and loading state
-  }, [chapters, isLoadingChapters]);
-  // --- End Drag and Drop ---
+    if (sortOrder === 'asc') {
+      filtered.sort((a, b) => a.order - b.order);
+    } else {
+      filtered.sort((a, b) => b.order - a.order);
+    }
+    return filtered;
+  }, [chapters, searchTerm, sortOrder]);
 
-  // Basic error handling if novelId is missing
-  if (!novelId) {
+  // Loading/Error checks
+  if (!novelId)
     return (
       <div className="p-6 text-center text-red-500">
-        Error: Novel ID not found in URL.
+        Error: Novel ID not found.
+      </div>
+    );
+  if (isLoadingNovel) {
+    return (
+      <div className="p-6 text-center text-[var(--color-text-muted)]">
+        Loading novel details...
+      </div>
+    );
+  }
+  if (!isLoadingNovel && !currentNovel) {
+    return (
+      <div className="p-6 text-center text-red-500">
+        Error: Could not load novel details.
       </div>
     );
   }
 
   return (
-    <DndProvider backend={HTML5Backend}>
+    <>
       <ConfirmModal
         isOpen={showConfirmModal}
         onClose={() => setShowConfirmModal(false)}
@@ -524,63 +474,110 @@ function WorkspaceEditorPage() {
         message={`Are you sure you want to permanently delete the chapter "${chapterToDeleteTitle}"? This cannot be undone.`}
       />
       <div className="flex h-full bg-[var(--color-cyber-bg)]">
-        {/* Chapter List Sidebar */}
-        <aside className="w-64 h-full flex-shrink-0 border-r border-[var(--color-border)] bg-gray-900/20 overflow-y-auto flex flex-col">
-          <div className="p-3 border-b border-[var(--color-border)] flex-shrink-0">
-            <h2 className="font-semibold text-[var(--color-neon-pink)] mb-2 uppercase text-sm tracking-wider">
-              Chapters
-            </h2>
+        {/* Sidebar */}
+        <aside className="w-64 h-full flex-shrink-0 border-r border-[var(--color-border)] bg-gray-900/20 flex flex-col">
+          <div className="sticky top-0 z-10 p-3 border-b border-[var(--color-border)] flex-shrink-0 bg-gray-900/50 backdrop-blur-sm">
+            {' '}
+            <div className="flex justify-between items-center mb-2">
+              {' '}
+              <h2 className="font-semibold text-[var(--color-neon-pink)] uppercase text-sm tracking-wider">
+                Chapters
+              </h2>{' '}
+              {isSavingNovel && <SpinnerIcon size="small" color="pink" />}{' '}
+            </div>{' '}
             <button
               onClick={handleCreateChapter}
               className="w-full btn-primary-pink text-xs py-1.5 flex items-center justify-center space-x-1 disabled:opacity-50"
-              disabled={isLoadingChapters} // Disable while loading
+              disabled={isLoadingChapters}
             >
-              <PlusIconMini /> <span>New Chapter</span>
-            </button>
+              {' '}
+              <PlusIconMini /> <span>New Chapter</span>{' '}
+            </button>{' '}
           </div>
-          <nav className="flex-grow p-2 space-y-1">
+          <div className="p-2 border-b border-[var(--color-border)] flex-shrink-0">
+            {' '}
+            <div className="relative mb-2">
+              {' '}
+              <input
+                type="text"
+                placeholder="Search chapters..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full text-xs px-2 py-1 rounded border border-[var(--color-border)] bg-[var(--color-content-bg)] text-[var(--color-text-base)] placeholder-gray-500 focus:ring-1 focus:ring-[var(--color-neon-cyan)] focus:border-[var(--color-neon-cyan)] outline-none"
+              />{' '}
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500">
+                <SearchIcon />
+              </span>{' '}
+            </div>{' '}
+            <div className="flex items-center justify-end space-x-1">
+              {' '}
+              <span className="text-xs text-gray-400 mr-1">Sort:</span>{' '}
+              <button
+                onClick={() => setSortOrder('asc')}
+                title="Sort Ascending"
+                className={`p-1 rounded ${
+                  sortOrder === 'asc'
+                    ? 'bg-[var(--color-neon-cyan)] text-black'
+                    : 'text-gray-400 hover:bg-gray-700 hover:text-[var(--color-neon-cyan)]'
+                }`}
+              >
+                {' '}
+                <SortAscIcon />{' '}
+              </button>{' '}
+              <button
+                onClick={() => setSortOrder('desc')}
+                title="Sort Descending"
+                className={`p-1 rounded ${
+                  sortOrder === 'desc'
+                    ? 'bg-[var(--color-neon-cyan)] text-black'
+                    : 'text-gray-400 hover:bg-gray-700 hover:text-[var(--color-neon-cyan)]'
+                }`}
+              >
+                {' '}
+                <SortDescIcon />{' '}
+              </button>{' '}
+            </div>{' '}
+          </div>
+          <nav className="flex-grow p-2 space-y-1 overflow-y-auto">
+            {' '}
             {isLoadingChapters ? (
               <p className="text-xs text-center text-gray-500 p-4">
                 Loading chapters...
               </p>
-            ) : chapters.length === 0 ? (
+            ) : displayChapters.length === 0 ? (
               <p className="text-xs text-center text-gray-500 p-4">
-                No chapters yet. Click 'New Chapter' to start.
+                {' '}
+                {searchTerm
+                  ? 'No chapters match search.'
+                  : 'No chapters yet.'}{' '}
               </p>
             ) : (
-              chapters.map((chap, index) => (
-                <DraggableChapterLink
+              displayChapters.map((chap) => (
+                <ChapterLink
                   key={chap._id}
                   chapter={chap}
-                  index={index}
-                  moveChapter={moveChapter}
                   onSelect={handleSelectChapter}
                   isActive={currentChapterId === chap._id}
                   onDelete={handleDeleteChapterClick}
                 />
               ))
-            )}
+            )}{' '}
           </nav>
-          {/* Optional: Save Order Button */}
-          {/* <div className="p-2 border-t border-[var(--color-border)]"> <button onClick={() => saveChapterOrder(chapters)} className="...">Save Order Now</button> </div> */}
         </aside>
-
         {/* Editor Area */}
         <div className="flex-grow h-full flex flex-col overflow-hidden bg-[var(--color-content-bg)]">
-          {/* Display Errors */}
           {error && (
             <div className="p-2 bg-red-900/70 text-red-300 text-sm text-center flex-shrink-0">
+              {' '}
               {error}{' '}
               <button
                 onClick={() => setError('')}
                 className="ml-2 text-red-200 hover:text-white"
               >
                 ×
-              </button>
+              </button>{' '}
             </div>
           )}
-
-          {/* Handle Loading/Empty States */}
           {isLoadingContent && (
             <div className="flex-grow flex items-center justify-center text-gray-400">
               Loading chapter content...
@@ -591,7 +588,7 @@ function WorkspaceEditorPage() {
             !currentChapterId &&
             chapters.length > 0 && (
               <div className="flex-grow flex items-center justify-center text-gray-400">
-                Select a chapter to start editing.
+                Select a chapter.
               </div>
             )}
           {!isLoadingChapters &&
@@ -599,30 +596,29 @@ function WorkspaceEditorPage() {
             !currentChapterId &&
             chapters.length === 0 && (
               <div className="flex-grow flex items-center justify-center text-gray-400">
-                Create your first chapter using the sidebar.
+                Create your first chapter.
               </div>
             )}
-
-          {/* Render NovelEditor only when chapter is loaded and selected */}
-          {!isLoadingContent && currentChapterId && (
+          {!isLoadingContent && currentChapterId && novelDefaults && (
             <NovelEditor
-              key={currentChapterId} // Force re-render on chapter change
+              key={currentChapterId}
               chapterId={currentChapterId}
               title={currentChapterTitle}
               initialContent={currentChapterContent}
               onTitleChange={handleTitleChange}
               onContentChange={handleContentChange}
               onSave={handleSaveChapter}
-              isSaving={isSaving}
-              stickyFormat={stickyFormat} // Pass state down
-              updateStickyFormat={updateStickyFormat} // Pass callback down
+              isSaving={isSavingChapter}
+              novelDefaults={novelDefaults}
+              onNovelDefaultsChange={handleNovelDefaultsChange}
             />
           )}
         </div>
       </div>
-    </DndProvider>
+    </>
   );
 }
+
 // --- Helper Icons ---
 const PlusIconMini = () => (
   <svg
@@ -653,6 +649,81 @@ const TrashIcon = () => (
       strokeLinecap="round"
       strokeLinejoin="round"
       d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"
+    />
+  </svg>
+);
+const SpinnerIcon = ({ size = 'small', color = 'cyan' }) => (
+  <svg
+    className={`animate-spin ${size === 'small' ? 'h-4 w-4' : 'h-5 w-5'} ${
+      color === 'pink'
+        ? 'text-[var(--color-neon-pink)]'
+        : 'text-[var(--color-neon-cyan)]'
+    }`}
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    viewBox="0 0 24 24"
+  >
+    {' '}
+    <circle
+      className="opacity-25"
+      cx="12"
+      cy="12"
+      r="10"
+      stroke="currentColor"
+      strokeWidth="4"
+    ></circle>{' '}
+    <path
+      className="opacity-75"
+      fill="currentColor"
+      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+    ></path>{' '}
+  </svg>
+);
+const SearchIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    viewBox="0 0 24 24"
+    strokeWidth={1.5}
+    stroke="currentColor"
+    className="w-4 h-4"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+    />
+  </svg>
+);
+const SortAscIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    viewBox="0 0 24 24"
+    strokeWidth={1.5}
+    stroke="currentColor"
+    className="w-4 h-4"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25-.75L17.25 9m0 0L21 12.75M17.25 9v12"
+    />
+  </svg>
+);
+const SortDescIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    viewBox="0 0 24 24"
+    strokeWidth={1.5}
+    stroke="currentColor"
+    className="w-4 h-4"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25.75L17.25 18m0 0L21 14.25M17.25 18V6"
     />
   </svg>
 );

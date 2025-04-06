@@ -1,51 +1,88 @@
+// ---> FILE: ./novel-editor-backend/routes/novels.js <---
+
 // routes/novels.js
 const express = require('express');
 const router = express.Router();
 const Novel = require('../models/Novel');
+const Chapter = require('../models/Chapter'); // Import Chapter for delete cascade
 const { protect } = require('../middleware/authMiddleware');
 
 // --- GET /api/novels ---
 // @desc    Get all novels for the logged-in user
 // @access  Private
-// (Keep existing GET route as is)
 router.get('/', protect, async (req, res) => {
-  try {
-    const novels = await Novel.find({ owner: req.user._id }).sort({ updatedAt: -1 });
-    res.status(200).json(novels);
-  } catch (error) {
-    console.error('Error fetching novels:', error);
-    res.status(500).json({ message: 'Server error fetching novels.' });
-  }
+    try {
+        const novels = await Novel.find({ owner: req.user._id }).sort({ updatedAt: -1 });
+        res.status(200).json(novels);
+    } catch (error) {
+        console.error('Error fetching novels:', error);
+        res.status(500).json({ message: 'Server error fetching novels.' });
+    }
 });
 
 // --- POST /api/novels ---
-// @desc    Create a new minimal novel shell for the logged-in user
+// @desc    Create a new novel with initial details
 // @access  Private
-// (Keep existing POST route - it already sets owner and default title)
 router.post('/', protect, async (req, res) => {
-  try {
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({ message: 'Not authorized, user data missing.' });
+    try {
+        if (!req.user || !req.user._id) {
+            return res.status(401).json({ message: 'Not authorized, user data missing.' });
+        }
+
+        const { title, author, genres, description } = req.body;
+
+        // ---> CHANGE START <---
+        // Validate incoming genres array structure (optional but good practice)
+        let processedGenres = [];
+        if (Array.isArray(genres)) {
+            processedGenres = genres
+                .filter(g => g && typeof g.name === 'string' && g.name.trim() !== '') // Basic filter
+                .map(g => ({
+                    name: g.name.trim(),
+                    isCustom: typeof g.isCustom === 'boolean' ? g.isCustom : false // Default isCustom if missing
+                }));
+            // Optional: Check for duplicate names within the submitted array
+            const names = new Set();
+            processedGenres = processedGenres.filter(g => {
+                const lowerName = g.name.toLowerCase();
+                if (names.has(lowerName)) return false; // Reject duplicate name
+                names.add(lowerName);
+                return true;
+            });
+        }
+        // ---> CHANGE END <---
+
+
+        const novelData = {
+            title: title || undefined,
+            owner: req.user._id,
+            author: author?.trim() || req.user.name || '',
+            // ---> CHANGE START <---
+            genres: processedGenres, // Use the processed array of objects
+            // ---> CHANGE END <---
+            description: description?.trim() || '',
+            // Schema defaults handle font settings
+        };
+
+        const newNovel = new Novel(novelData);
+        const savedNovel = await newNovel.save(); // Mongoose validation runs here
+        res.status(201).json(savedNovel);
+
+    } catch (error) {
+        console.error('Error creating novel:', error);
+        if (error.name === 'ValidationError') {
+            // Extract more specific messages if possible, including nested errors for genres
+            let messages = Object.values(error.errors).map(val => {
+                // Handle nested errors within the genres array
+                if (val.path?.startsWith('genres.') && val.properties) {
+                    return `${val.path}: ${val.properties.message}`;
+                }
+                return val.message;
+            });
+            return res.status(400).json({ message: messages.join('. ') || 'Novel validation failed.' });
+        }
+        res.status(500).json({ message: 'Server error creating novel.' });
     }
-    // Title is optional here, uses default from schema if not provided
-    const { title } = req.body;
-
-    const newNovel = new Novel({
-      title: title || undefined, // Use schema default if title not sent
-      owner: req.user._id,
-      author: req.user.name || '', // Pre-fill author with user's name if available
-    });
-
-    const savedNovel = await newNovel.save();
-    res.status(201).json(savedNovel); // Send back the created novel object
-
-  } catch (error) {
-    console.error('Error creating novel:', error);
-    if (error.name === 'ValidationError') {
-        return res.status(400).json({ message: `Novel validation failed: ${error.message}` });
-    }
-    res.status(500).json({ message: 'Server error creating novel.' });
-  }
 });
 
 // --- GET /api/novels/:id ---
@@ -66,70 +103,103 @@ router.get('/:id', protect, async (req, res) => {
 
     } catch (error) {
         console.error(`Error fetching novel ${req.params.id}:`, error);
-         // Handle CastError if ID format is invalid
-         if (error.name === 'CastError') {
-             return res.status(400).json({ message: 'Invalid novel ID format.' });
-         }
+        // Handle CastError if ID format is invalid
+        if (error.name === 'CastError') {
+            return res.status(400).json({ message: 'Invalid novel ID format.' });
+        }
         res.status(500).json({ message: 'Server error fetching novel.' });
     }
 });
 
 
 // --- PUT /api/novels/:id ---
-// @desc    Update a specific novel by ID for the logged-in user
+// @desc    Update a specific novel by ID (Handles FULL and PARTIAL updates)
 // @access  Private
 router.put('/:id', protect, async (req, res) => {
-    const { title, author, genres, description } = req.body;
+    // Destructure potentially updated fields
+    const { title, author, genres, description, defaultFontFamily, defaultFontSize } = req.body;
+    const novelId = req.params.id;
+    const userId = req.user._id;
 
-    // Basic validation
-    if (!title) { // Title becomes mandatory on update/save
-        return res.status(400).json({ message: 'Novel title cannot be empty.' });
+    const fieldsToUpdate = {};
+
+    if (title !== undefined) fieldsToUpdate.title = title.trim();
+    if (author !== undefined) fieldsToUpdate.author = author.trim();
+    if (description !== undefined) fieldsToUpdate.description = description.trim();
+    if (defaultFontFamily !== undefined) fieldsToUpdate.defaultFontFamily = defaultFontFamily.trim();
+    if (defaultFontSize !== undefined) fieldsToUpdate.defaultFontSize = defaultFontSize.trim();
+
+    // ---> CHANGE START <---
+    // Handle the genres array update specifically
+    if (genres !== undefined) {
+        // Validate incoming genres array structure
+        if (!Array.isArray(genres)) {
+            return res.status(400).json({ message: 'Genres must be an array.' });
+        }
+        let processedGenres = genres
+            .filter(g => g && typeof g.name === 'string' && g.name.trim() !== '')
+            .map(g => ({
+                name: g.name.trim(),
+                isCustom: typeof g.isCustom === 'boolean' ? g.isCustom : false // Default isCustom
+            }));
+        // Optional: Check for duplicate names within the submitted array
+        const names = new Set();
+        processedGenres = processedGenres.filter(g => {
+            const lowerName = g.name.toLowerCase();
+            if (names.has(lowerName)) return false;
+            names.add(lowerName);
+            return true;
+        });
+
+        fieldsToUpdate.genres = processedGenres; // Add the validated array to fieldsToUpdate
+    }
+    // ---> CHANGE END <---
+
+    if (Object.keys(fieldsToUpdate).length === 0) {
+        return res.status(400).json({ message: 'No update fields provided.' });
+    }
+    if (fieldsToUpdate.hasOwnProperty('title') && !fieldsToUpdate.title) {
+        return res.status(400).json({ message: 'Novel title cannot be empty when updating it.' });
     }
 
     try {
-        // Find the novel ensuring the user owns it
-        const novel = await Novel.findOne({
-             _id: req.params.id,
-             owner: req.user._id
-        });
+        const updatedNovel = await Novel.findOneAndUpdate(
+            { _id: novelId, owner: userId },
+            { $set: fieldsToUpdate }, // $set will replace the entire genres array if provided
+            { new: true, runValidators: true, context: 'query' }
+        );
 
-        if (!novel) {
+        if (!updatedNovel) {
             return res.status(404).json({ message: 'Novel not found or not authorized.' });
         }
-
-        // Update fields
-        novel.title = title;
-        novel.author = author || req.user.name || ''; // Use provided author, fallback to user name, then empty
-        novel.genres = Array.isArray(genres) ? genres : []; // Ensure genres is an array
-        novel.description = description || '';
-
-        const updatedNovel = await novel.save(); // Mongoose validation runs here
-
         res.status(200).json(updatedNovel);
 
     } catch (error) {
-         console.error(`Error updating novel ${req.params.id}:`, error);
-         if (error.name === 'ValidationError') {
-            return res.status(400).json({ message: `Novel validation failed: ${error.message}` });
-         }
-         if (error.name === 'CastError') {
-             return res.status(400).json({ message: 'Invalid novel ID format.' });
-         }
+        console.error(`Error updating novel ${novelId}:`, error);
+        if (error.name === 'ValidationError') {
+            let messages = Object.values(error.errors).map(val => {
+                // Handle nested errors within the genres array
+                if (val.path?.startsWith('genres.') && val.properties) {
+                    return `${val.path}: ${val.properties.message}`;
+                }
+                return val.message;
+            });
+            return res.status(400).json({ message: messages.join('. ') || 'Novel validation failed.' });
+        }
+        if (error.name === 'CastError') { return res.status(400).json({ message: 'Invalid novel ID format.' }); }
         res.status(500).json({ message: 'Server error updating novel.' });
     }
 });
 
-
-// --- Add DELETE Route ---
-// DELETE /api/novels/:id
+// --- DELETE /api/novels/:id ---
 // @desc    Delete a novel owned by the user
 // @access  Private
 router.delete('/:id', protect, async (req, res) => {
     try {
         // Find the novel first to ensure it exists and belongs to the user
         const novel = await Novel.findOne({
-             _id: req.params.id,
-             owner: req.user._id // Check ownership
+            _id: req.params.id,
+            owner: req.user._id // Check ownership
         });
 
         if (!novel) {
@@ -137,13 +207,18 @@ router.delete('/:id', protect, async (req, res) => {
             return res.status(404).json({ message: 'Novel not found or not authorized.' });
         }
 
-        // Use deleteOne method on the model, ensuring ownership again for safety
+        // Delete the novel itself
         const result = await Novel.deleteOne({ _id: req.params.id, owner: req.user._id });
 
         if (result.deletedCount === 0) {
-             // Should not happen if findOne succeeded, but good check
-             return res.status(404).json({ message: 'Novel not found or not authorized.' });
+            // Should not happen if findOne succeeded, but good check
+            return res.status(404).json({ message: 'Novel not found or deletion failed.' });
         }
+
+        // Delete associated chapters
+        console.log(`Deleting chapters associated with novel ${req.params.id}`);
+        const chapterDeletionResult = await Chapter.deleteMany({ novel: req.params.id });
+        console.log(`Deleted ${chapterDeletionResult.deletedCount} chapters.`);
 
         console.log(`Novel ${req.params.id} deleted by user ${req.user._id}`);
         res.status(200).json({ message: 'Novel successfully deleted.' });
@@ -158,10 +233,7 @@ router.delete('/:id', protect, async (req, res) => {
 });
 
 // --- Mount Chapter Routes ---
-// Any request to /api/novels/:novelId/chapters will be handled by chapterRouter
-const chapterRouter = require('./chapters'); // Assuming chapters.js is in the same directory
+const chapterRouter = require('./chapters');
 router.use('/:novelId/chapters', chapterRouter);
-// --- End Mount Chapter Routes ---
-// --- End Added Route ---
 
 module.exports = router;

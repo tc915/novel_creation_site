@@ -1,5 +1,24 @@
+// ---> FILE: ./novel-editor-backend/models/Novel.js <---
+
 // models/Novel.js
 const mongoose = require('mongoose');
+
+// ---> CHANGE START <---
+// Define the sub-schema for a genre object
+const genreObjectSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  isCustom: {
+    type: Boolean,
+    default: false, // Default to false (predefined) unless specified
+    required: true,
+  }
+}, { _id: false }); // No separate _id for the subdocument needed
+// ---> CHANGE END <---
+
 
 const novelSchema = new mongoose.Schema(
   {
@@ -7,44 +26,52 @@ const novelSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Novel title is required.'],
       trim: true,
-      default: 'Untitled Novel', // Keep default for initial creation
+      default: 'Untitled Novel',
     },
     owner: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,
       ref: 'User',
     },
-    // --- Added Fields ---
-    author: { // Let's store author explicitly, might differ from owner
-      type: String,
-      trim: true,
-      default: '', // Default to empty, frontend can prefill with user name
-    },
-    genres: { // Array of strings for genres
-      type: [String],
-      default: [],
-    },
-    description: { // Synopsis or description
+    author: {
       type: String,
       trim: true,
       default: '',
     },
-    // --- End Added Fields ---
-    // --- Add Chapters Array ---
+    // ---> CHANGE START <---
+    // Use the new sub-schema for the genres array
+    genres: {
+      type: [genreObjectSchema], // Array of genre objects
+      default: [],
+    },
+    // ---> CHANGE END <---
+    description: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    defaultFontFamily: {
+      type: String,
+      trim: true,
+      default: 'Open Sans',
+    },
+    defaultFontSize: {
+      type: String,
+      trim: true,
+      default: '16px',
+    },
     chapters: [{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Chapter'
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Chapter'
     }],
-    // --- End Added Field ---
-    // characters: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Character' }],
-    // worldItems: [{ type: mongoose.Schema.Types.ObjectId, ref: 'WorldItem' }],
-    // outline: { type: Object },
-    // notes: { type: String },
   },
   {
-    timestamps: true, // Adds createdAt and updatedAt automatically
+    timestamps: true,
   }
 );
+
+// Optional: Add an index on genre name if needed for performance, though maybe less useful with objects
+// novelSchema.index({ 'genres.name': 1 });
 
 const Novel = mongoose.model('Novel', novelSchema);
 

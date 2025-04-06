@@ -1,38 +1,28 @@
-// src/components/FontSizeControl.jsx
+// ---> FILE: ./novel-editor-frontend/src/components/FontSizeControl.jsx <---
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useSlate, ReactEditor } from 'slate-react';
-import { Editor, Transforms } from 'slate';
+// Removed Slate hooks
+import {
+  POPULAR_FONT_SIZES,
+  DEFAULT_FONT_SIZE_NUM,
+  DEFAULT_FONT_SIZE_STR,
+  MIN_FONT_SIZE,
+  MAX_FONT_SIZE
+} from '../utils/slateEditorUtils';
+// ---> CHANGE START <---
+// Ensure Framer Motion is imported
 import { motion, AnimatePresence } from 'framer-motion';
+// ---> CHANGE END <---
 
-// Define defaults here or import them
-const POPULAR_FONT_SIZES = [
-  '10px',
-  '12px',
-  '14px',
-  '16px',
-  '18px',
-  '24px',
-  '36px',
-  '48px',
-  '72px'
-];
-const DEFAULT_FONT_SIZE_NUM = 16;
-const DEFAULT_FONT_SIZE_STR = `${DEFAULT_FONT_SIZE_NUM}px`;
-const MIN_FONT_SIZE = 10;
-const MAX_FONT_SIZE = 75;
-
-// Helper to get current font size for input display (based on selection)
-const getCurrentFontSizeForInput = (editor) => {
-  if (!editor) return '';
-  const currentSizeMark = Editor.marks(editor)?.fontSize;
-  if (currentSizeMark && currentSizeMark !== DEFAULT_FONT_SIZE_STR) {
-    const sizeNum = parseInt(currentSizeMark, 10);
-    return isNaN(sizeNum) ? '' : sizeNum.toString();
-  }
-  return ''; // Return empty if default or no mark applied
+// Helper to extract number from size string
+const parseSizeString = (sizeStr) => {
+  if (!sizeStr) return '';
+  const match = sizeStr.match(/^(\d+)/);
+  return match ? match[1] : '';
 };
 
-// Framer Motion Variants
+// ---> CHANGE START <---
+// Framer Motion Variants (Define or ensure they exist - can be same as FontFamilyControl)
 const listVariants = {
   open: {
     opacity: 1,
@@ -68,32 +58,27 @@ const itemVariants = {
     transition: { type: 'tween', duration: 0.1, ease: 'easeIn' }
   }
 };
+// ---> CHANGE END <---
 
 // --- Component ---
-function FontSizeControl({ updateStickyFormat, stickyFormat }) {
-  // Receive props
-  const editor = useSlate();
+// Receive currentNovelDefault and the change handler
+function FontSizeControl({ currentNovelDefault, onNovelDefaultsChange }) {
   const [isOpen, setIsOpen] = useState(false);
-  // Input value reflects current SELECTION's format, or empty for default
   const [internalInputValue, setInternalInputValue] = useState('');
   const containerRef = useRef(null);
-  const inputRef = useRef(null); // Ref for the input element
+  const inputRef = useRef(null);
 
-  // --- Sync input value with editor selection ---
+  // Sync input value with novel default prop
   useEffect(() => {
-    if (editor) {
-      const currentEditorSize = getCurrentFontSizeForInput(editor);
-      // Update input only if it's not currently focused
-      if (document.activeElement !== inputRef.current) {
-        setInternalInputValue(currentEditorSize);
-      }
-    } else {
-      setInternalInputValue('');
+    const defaultSizeNumStr = parseSizeString(
+      currentNovelDefault || DEFAULT_FONT_SIZE_STR
+    );
+    if (document.activeElement !== inputRef.current) {
+      setInternalInputValue(defaultSizeNumStr);
     }
-    // Depend on editor marks stringified to detect changes
-  }, [editor, editor?.selection, JSON.stringify(Editor.marks(editor))]);
+  }, [currentNovelDefault]);
 
-  // --- Handle clicks outside ---
+  // Handle clicks outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (
@@ -101,10 +86,10 @@ function FontSizeControl({ updateStickyFormat, stickyFormat }) {
         !containerRef.current.contains(event.target)
       ) {
         setIsOpen(false);
-        // Revert input value to match editor state when closing dropdown by clicking outside
-        if (editor) {
-          setInternalInputValue(getCurrentFontSizeForInput(editor));
-        }
+        const defaultSizeNumStr = parseSizeString(
+          currentNovelDefault || DEFAULT_FONT_SIZE_STR
+        );
+        setInternalInputValue(defaultSizeNumStr);
       }
     };
     if (isOpen) {
@@ -115,84 +100,66 @@ function FontSizeControl({ updateStickyFormat, stickyFormat }) {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isOpen, editor]);
+  }, [isOpen, currentNovelDefault]);
 
-  // --- Apply Font Size Logic (Helper inside or call external) ---
+  // Apply Font Size Logic
   const applySize = useCallback(
-    (sizeString) => {
-      if (!editor) return;
-
-      let newSizeMark = null; // Will be null if default
-      const sizeNum = parseInt(sizeString, 10);
-
-      // Validate and format the mark value
+    (sizeInputValue) => {
+      if (!onNovelDefaultsChange) return;
+      let finalSizeStr = DEFAULT_FONT_SIZE_STR;
+      const sizeNum = parseInt(sizeInputValue, 10);
       if (
         !isNaN(sizeNum) &&
         sizeNum >= MIN_FONT_SIZE &&
         sizeNum <= MAX_FONT_SIZE
       ) {
-        if (sizeNum !== DEFAULT_FONT_SIZE_NUM) {
-          newSizeMark = `${sizeNum}px`;
-        }
+        finalSizeStr = `${sizeNum}px`;
       } else {
-        console.warn('Invalid font size applied or cleared:', sizeString);
-        // Keep newSizeMark as null (default)
+        console.warn(
+          'Invalid font size input, reverting to default:',
+          sizeInputValue
+        );
+        finalSizeStr = DEFAULT_FONT_SIZE_STR;
       }
-
-      // 1. Apply to current selection/editor.marks
-      Editor.removeMark(editor, 'fontSize'); // Remove old mark first
-      if (newSizeMark) {
-        Editor.addMark(editor, 'fontSize', newSizeMark);
-      }
-
-      // 2. Update sticky format state
-      updateStickyFormat('fontSize', newSizeMark); // Pass mark value (or null)
-
-      // Update input display to reflect selection (might be empty if default)
-      setInternalInputValue(getCurrentFontSizeForInput(editor));
-
-      // Refocus editor needed?
-      // setTimeout(() => { if (!ReactEditor.isFocused(editor)) ReactEditor.focus(editor) }, 0);
+      onNovelDefaultsChange('fontSize', finalSizeStr);
+      setInternalInputValue(parseSizeString(finalSizeStr));
     },
-    [editor, updateStickyFormat]
+    [onNovelDefaultsChange]
   );
 
   // --- Event Handlers ---
   const handleInputChange = (e) => {
     const value = e.target.value;
-    // Allow only digits, max 2 chars
     if (/^\d*$/.test(value) && value.length <= 2) {
       setInternalInputValue(value);
     }
   };
-
   const handleInputKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      applySize(internalInputValue); // Apply from input value
+      applySize(internalInputValue);
       setIsOpen(false);
       e.target.blur();
     }
     if (e.key === 'Escape') {
       e.preventDefault();
-      if (editor) setInternalInputValue(getCurrentFontSizeForInput(editor)); // Revert input
+      const defaultSizeNumStr = parseSizeString(
+        currentNovelDefault || DEFAULT_FONT_SIZE_STR
+      );
+      setInternalInputValue(defaultSizeNumStr);
       setIsOpen(false);
       e.target.blur();
     }
   };
-
   const handleInputBlur = (e) => {
-    // Apply only if focus moves outside the component AND dropdown is not open
     if (!containerRef.current?.contains(e.relatedTarget) && !isOpen) {
       applySize(internalInputValue);
     }
   };
-
   const handleDropdownSelect = (size) => {
-    applySize(size); // Apply directly from dropdown value (e.g., "14px")
+    applySize(parseSizeString(size));
     setIsOpen(false);
   };
-
   const toggleDropdown = (e) => {
     e.preventDefault();
     setIsOpen(!isOpen);
@@ -200,18 +167,15 @@ function FontSizeControl({ updateStickyFormat, stickyFormat }) {
 
   const placeholderSize = DEFAULT_FONT_SIZE_NUM.toString();
 
-  // Don't render if editor not ready
-  if (!editor) return null;
-
   return (
     <div
       className="relative"
       ref={containerRef}
-      title={`Font Size (${MIN_FONT_SIZE}-${MAX_FONT_SIZE})`}
+      title={`Novel Default Font Size (${MIN_FONT_SIZE}-${MAX_FONT_SIZE})`}
     >
       <div className="flex items-center border border-[var(--color-border)] rounded h-[28px] w-[75px] bg-[var(--color-content-bg)] focus-within:ring-1 focus-within:ring-[var(--color-neon-cyan)]">
         <input
-          ref={inputRef} // Attach ref
+          ref={inputRef}
           type="text"
           value={internalInputValue}
           onChange={handleInputChange}
@@ -230,21 +194,25 @@ function FontSizeControl({ updateStickyFormat, stickyFormat }) {
           className="flex items-center justify-center h-full px-1 border-l border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-neon-cyan)] focus:outline-none"
           aria-haspopup="listbox"
           aria-expanded={isOpen}
-          tabIndex={-1} // Prevent tabbing to button itself
+          tabIndex={-1}
         >
           <svg
             className="fill-current h-3 w-3"
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 20 20"
           >
-            <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />
+            {' '}
+            <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z" />{' '}
           </svg>
         </button>
       </div>
 
+      {/* ---> CHANGE START <--- */}
+      {/* Wrap the dropdown list with AnimatePresence */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
+            // Apply variants and animation props
             variants={listVariants}
             initial="closed"
             animate="open"
@@ -253,15 +221,15 @@ function FontSizeControl({ updateStickyFormat, stickyFormat }) {
             role="listbox"
           >
             {POPULAR_FONT_SIZES.map((size) => (
+              // Apply item variants to each button
               <motion.button
                 key={size}
-                variants={itemVariants}
+                variants={itemVariants} // Apply item variants
                 type="button"
                 role="option"
-                // Visually indicate selection if input matches dropdown value (ignoring 'px')
-                aria-selected={internalInputValue === size.replace('px', '')}
+                aria-selected={internalInputValue === parseSizeString(size)}
                 className={`block w-full text-left px-3 py-1.5 text-xs font-mono transition-colors duration-100 ${
-                  internalInputValue === size.replace('px', '')
+                  internalInputValue === parseSizeString(size)
                     ? 'bg-[var(--color-content-bg)] text-[var(--color-neon-cyan)]'
                     : 'text-[var(--color-text-base)] hover:bg-gray-800 hover:text-[var(--color-neon-cyan)]'
                 }`}
@@ -271,12 +239,13 @@ function FontSizeControl({ updateStickyFormat, stickyFormat }) {
                   handleDropdownSelect(size);
                 }}
               >
-                {size.replace('px', '')}
+                {parseSizeString(size)}
               </motion.button>
             ))}
           </motion.div>
         )}
       </AnimatePresence>
+      {/* ---> CHANGE END <--- */}
     </div>
   );
 }

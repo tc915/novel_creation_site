@@ -1,48 +1,48 @@
-// src/components/EditorToolbar.jsx
+// ---> FILE: ./novel-editor-frontend/src/components/EditorToolbar.jsx <---
+
 import React, { useCallback } from 'react';
+// ---> CHANGE START <---
+// Remove Slate hooks unless needed for block formatting later
 import { useSlate, ReactEditor } from 'slate-react';
 import { Editor } from 'slate';
+// ---> CHANGE END <---
 import FontSizeControl from './FontSizeControl'; // Adjust path if needed
 import FontFamilyControl from './FontFamilyControl'; // Adjust path if needed
-
-// Define defaults here or import them
-const DEFAULT_COLOR = '#CBD5E1'; // Match index.css --color-text-base
-const DEFAULT_FONT_SIZE_STR = '16px';
-const DEFAULT_FONT_FAMILY = 'Open Sans'; // Match index.css --font-body
+// ---> CHANGE START <---
+// Use centralized defaults
+import { DEFAULT_COLOR } from '../utils/slateEditorUtils';
+// Remove local defaults
+// ---> CHANGE END <---
 
 // --- Reusable Toolbar Button ---
-const MarkButton = React.memo(({ format, children, updateStickyFormat }) => {
+// This button still modifies the *selection's* marks directly.
+// It does NOT affect novel defaults. Keep this as is for bold/italic.
+const MarkButton = React.memo(({ format, children }) => {
+  // ---> CHANGE START <---
+  // Need useSlate here to interact with selection marks
   const editor = useSlate();
   if (!editor) return null;
-
-  // Visual state based on current selection's marks
   const isActive = Editor.marks(editor)?.[format] === true;
-
   const handleMouseDown = useCallback(
     (event) => {
       event.preventDefault();
-      const willBeActive = !isActive;
-
-      // Apply/remove mark from current selection
-      if (willBeActive) {
-        Editor.addMark(editor, format, true);
-      } else {
+      if (isActive) {
         Editor.removeMark(editor, format);
+      } else {
+        Editor.addMark(editor, format, true);
       }
-
-      // Update the sticky format state in the parent component
-      updateStickyFormat(format, willBeActive ? true : null); // Send true or null
-
-      // Refocus might not be needed if editor retains focus
-      // setTimeout(() => ReactEditor.focus(editor), 0);
+      // No need to update sticky format anymore
+      // updateStickyFormat(format, willBeActive ? true : null);
+      setTimeout(() => ReactEditor.focus(editor), 0); // Keep focus deferral
     },
-    [editor, isActive, format, updateStickyFormat]
-  ); // Add dependencies
+    [editor, isActive, format]
+  );
+  // ---> CHANGE END <---
 
   return (
     <button
       type="button"
-      aria-pressed={isActive} // Reflects current selection state
+      aria-pressed={isActive}
       onMouseDown={handleMouseDown}
       className={`p-1.5 rounded text-sm transition duration-100 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-offset-gray-900 focus:ring-[var(--color-neon-cyan)] ${
         isActive
@@ -54,85 +54,88 @@ const MarkButton = React.memo(({ format, children, updateStickyFormat }) => {
     </button>
   );
 });
-MarkButton.displayName = 'MarkButton'; // For React DevTools
+MarkButton.displayName = 'MarkButton';
 
 // --- Color Picker Component ---
-const ColorPicker = React.memo(({ updateStickyFormat }) => {
+// This component *could* control the novel's default color OR selection color.
+// For now, let's make it control the SELECTION color, similar to Bold/Italic.
+// To control novel default, it would need `novelDefaults` and `onNovelDefaultsChange` props.
+const ColorPicker = React.memo(() => {
+  // ---> CHANGE START <---
+  // Get editor to modify selection marks
   const editor = useSlate();
   if (!editor) return null;
-
-  // Determine color based on current selection or default
+  // Determine color based on current SELECTION or CSS default
   const currentColorInSelection = (
     Editor.marks(editor)?.color || DEFAULT_COLOR
   ).toUpperCase();
 
   const handleColorChange = useCallback(
     (e) => {
-      const newColor = e.target.value.toUpperCase(); // Normalize to uppercase
-
-      // Apply/remove color mark from current selection
-      Editor.removeMark(editor, 'color'); // Remove old color mark first
+      const newColor = e.target.value.toUpperCase();
+      // Apply/remove color mark from current SELECTION
+      Editor.removeMark(editor, 'color');
       if (newColor !== DEFAULT_COLOR) {
         Editor.addMark(editor, 'color', newColor);
       }
-
-      // Update the sticky format state
-      updateStickyFormat('color', newColor === DEFAULT_COLOR ? null : newColor); // Send color or null
-
-      // setTimeout(() => ReactEditor.focus(editor), 0); // Refocus if needed
+      // No sticky format update
+      // updateStickyFormat('color', newColor === DEFAULT_COLOR ? null : newColor);
+      setTimeout(() => ReactEditor.focus(editor), 0); // Keep focus deferral
     },
-    [editor, updateStickyFormat]
-  );
+    [editor]
+  ); // Update dependencies
+  // ---> CHANGE END <---
 
   return (
     <div
-      onMouseDown={(e) => e.preventDefault()} // Prevent editor blur
+      onMouseDown={(e) => e.preventDefault()}
       className="p-0 border border-[var(--color-border)] rounded hover:ring-1 hover:ring-[var(--color-neon-pink)] focus-within:ring-1 focus-within:ring-[var(--color-neon-pink)] w-[28px] h-[28px] flex items-center justify-center"
-      style={{ backgroundColor: currentColorInSelection }} // Show selection's color
-      title="Text Color"
+      style={{ backgroundColor: currentColorInSelection }}
+      title="Text Color (Selection)"
     >
       <input
         type="color"
-        value={currentColorInSelection} // Bind to selection's color
+        value={currentColorInSelection}
         onChange={handleColorChange}
         className="w-full h-full opacity-0 cursor-pointer"
       />
     </div>
   );
 });
-ColorPicker.displayName = 'ColorPicker'; // For React DevTools
+ColorPicker.displayName = 'ColorPicker';
 
 // --- Main Toolbar Component ---
-function EditorToolbar({ updateStickyFormat, stickyFormat }) {
-  // Receive props
+// ---> CHANGE START <---
+// Receive novel defaults and change handler
+function EditorToolbar({ novelDefaults, onNovelDefaultsChange }) {
+  // ---> CHANGE END <---
   return (
     <div className="flex flex-wrap items-center space-x-1 border-b border-[var(--color-border)] p-2 bg-gray-900 flex-shrink-0 sticky top-0 z-10">
-      {/* Pass props down to child controls */}
+      {/* ---> CHANGE START <--- */}
+      {/* Pass novel defaults and change handler to Font controls */}
       <FontFamilyControl
-        updateStickyFormat={updateStickyFormat}
-        stickyFormat={stickyFormat}
+        currentNovelDefault={novelDefaults?.fontFamily}
+        onNovelDefaultsChange={onNovelDefaultsChange}
       />
-      <div className="w-px h-4 bg-[var(--color-border)] mx-1 self-center"></div>{' '}
-      {/* Divider */}
+      <div className="w-px h-4 bg-[var(--color-border)] mx-1 self-center"></div>
       <FontSizeControl
-        updateStickyFormat={updateStickyFormat}
-        stickyFormat={stickyFormat}
+        currentNovelDefault={novelDefaults?.fontSize}
+        onNovelDefaultsChange={onNovelDefaultsChange}
       />
-      <div className="w-px h-4 bg-[var(--color-border)] mx-1 self-center"></div>{' '}
-      {/* Divider */}
-      {/* Pass props down */}
-      <MarkButton format="bold" updateStickyFormat={updateStickyFormat}>
-        <span className="font-bold text-base leading-none">B</span>
+      <div className="w-px h-4 bg-[var(--color-border)] mx-1 self-center"></div>
+      {/* MarkButtons affect selection, don't need novel props */}
+      <MarkButton format="bold">
+        {' '}
+        <span className="font-bold text-base leading-none">B</span>{' '}
       </MarkButton>
-      <MarkButton format="italic" updateStickyFormat={updateStickyFormat}>
-        <span className="italic text-base leading-none">I</span>
+      <MarkButton format="italic">
+        {' '}
+        <span className="italic text-base leading-none">I</span>{' '}
       </MarkButton>
-      {/* Add Underline, Strikethrough etc. similarly */}
-      <div className="w-px h-4 bg-[var(--color-border)] mx-1 self-center"></div>{' '}
-      {/* Divider */}
-      {/* Pass props down */}
-      <ColorPicker updateStickyFormat={updateStickyFormat} />
-      {/* Add more buttons/controls here (e.g., lists, alignment) */}
+      <div className="w-px h-4 bg-[var(--color-border)] mx-1 self-center"></div>
+      {/* ColorPicker affects selection */}
+      <ColorPicker />
+      {/* ---> CHANGE END <--- */}
     </div>
   );
 }

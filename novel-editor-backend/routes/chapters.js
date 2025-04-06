@@ -1,17 +1,21 @@
+// ---> FILE: ./novel-editor-backend/routes/chapters.js <---
+
 // routes/chapters.js
 const express = require('express');
 const router = express.Router({ mergeParams: true }); // Enable param merging
 const Novel = require('../models/Novel');
 const Chapter = require('../models/Chapter');
 const { protect } = require('../middleware/authMiddleware'); // Adjust path if needed
+const mongoose = require('mongoose'); // Keep for potential future transaction use
 
 // --- Helper to verify novel ownership ---
-const verifyNovelOwnership = async (novelId, userId) => {
-    const novel = await Novel.findOne({ _id: novelId, owner: userId });
+const verifyNovelOwnership = async (novelId, userId, session) => { // Added session param
+    // Find novel within the session if provided
+    const novel = await Novel.findOne({ _id: novelId, owner: userId }).session(session);
     if (!novel) {
         const error = new Error('Novel not found or not authorized.');
         error.status = 404;
-        throw error;
+        throw error; // Throw error to be caught by transaction handler
     }
     return novel; // Return the novel if found and owned
 };
@@ -23,15 +27,15 @@ router.get('/', protect, async (req, res, next) => { // Use next for error handl
     const { novelId } = req.params;
     const userId = req.user._id;
     try {
-        await verifyNovelOwnership(novelId, userId); // Verify ownership first
-        const chapters = await Chapter.find({ novel: novelId /* Removed owner check here as novel ownership implies chapter access */ })
+        await verifyNovelOwnership(novelId, userId); // Verification without session needed here
+        // Chapters should always be fetched sorted by their 'order' field
+        const chapters = await Chapter.find({ novel: novelId })
             .sort({ order: 1 })
             .select('title order _id createdAt updatedAt'); // Select only needed list fields
 
         res.status(200).json(chapters);
     } catch (error) {
         console.error(`Error fetching chapters for novel ${novelId}:`, error);
-        // Pass error to Express error handler or handle specific cases
         if (error.name === 'CastError') {
             return res.status(400).json({ message: 'Invalid novel ID format.' });
         }
@@ -47,11 +51,12 @@ router.post('/', protect, async (req, res, next) => {
     const userId = req.user._id;
     const { title } = req.body; // Optional: Allow title override on creation
 
+    const session = await mongoose.startSession(); // Use transaction for create+update
+    session.startTransaction();
     try {
-        const parentNovel = await verifyNovelOwnership(novelId, userId); // Verify ownership
-
-        const existingChapterCount = await Chapter.countDocuments({ novel: novelId });
-        const newOrder = existingChapterCount;
+        const parentNovel = await verifyNovelOwnership(novelId, userId, session);
+        const existingChapterCount = await Chapter.countDocuments({ novel: novelId }).session(session);
+        const newOrder = existingChapterCount; // Order is 0-based index
 
         const newChapter = new Chapter({
             title: title || `Chapter ${newOrder + 1}`, // Use provided title or default
@@ -60,25 +65,83 @@ router.post('/', protect, async (req, res, next) => {
             owner: userId, // Explicitly set owner on chapter too
         });
 
-        const savedChapter = await newChapter.save();
+        const savedChapter = await newChapter.save({ session });
 
-        // --- IMPORTANT: Add chapter reference to Novel ---
+        // Add chapter reference to Novel's chapter array (maintains order implicitly if pushed)
         parentNovel.chapters.push(savedChapter._id);
-        await parentNovel.save();
-        // --- End Novel Update ---
+        await parentNovel.save({ session });
 
-        console.log(`New chapter created for novel ${novelId}: ${savedChapter._id}`);
+        await session.commitTransaction(); // Commit successful transaction
+
+        console.log(`New chapter created for novel ${novelId}: ${savedChapter._id} with order ${newOrder}`);
         // Return essential data, including the full new chapter object
         res.status(201).json(savedChapter);
 
     } catch (error) {
+        await session.abortTransaction(); // Abort transaction on error
         console.error(`Error creating chapter for novel ${novelId}:`, error);
         if (error.name === 'ValidationError') {
             return res.status(400).json({ message: `Chapter validation failed: ${error.message}` });
         }
         next(error);
+    } finally {
+        session.endSession(); // Always end the session
     }
 });
+
+// ---> CHANGE START <---
+// --- DELETE /api/novels/:novelId/chapters/all ---
+// @desc    Delete ALL chapters for a specific novel
+// @access  Private
+// !!! DEFINE THIS ROUTE *BEFORE* /:chapterId routes that use DELETE !!!
+router.delete('/all', protect, async (req, res, next) => {
+    const { novelId } = req.params;
+    const userId = req.user._id;
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        // 1. Verify ownership and get the novel
+        const novel = await verifyNovelOwnership(novelId, userId, session);
+
+        // 2. Delete all chapters associated with this novel
+        console.log(`Attempting to delete all chapters for novel ${novelId}`);
+        const deleteResult = await Chapter.deleteMany({ novel: novelId, owner: userId }).session(session);
+        console.log(`Deleted ${deleteResult.deletedCount} chapters for novel ${novelId}`);
+
+        // 3. Clear the chapters array in the parent novel
+        novel.chapters = [];
+        await novel.save({ session });
+        console.log(`Cleared chapters array for novel ${novelId}`);
+
+        // 4. Commit transaction
+        await session.commitTransaction();
+
+        res.status(200).json({ message: `Successfully deleted ${deleteResult.deletedCount} chapters.` });
+
+    } catch (error) {
+        // Abort transaction on any error
+        await session.abortTransaction();
+        console.error(`Error deleting all chapters for novel ${novelId}:`, error);
+
+        if (error.status === 404) { // Specific error from verifyNovelOwnership
+            return res.status(404).json({ message: error.message });
+        }
+        if (error.name === 'CastError') {
+            return res.status(400).json({ message: 'Invalid novel ID format.' });
+        }
+        // Generic server error for other issues
+        res.status(500).json({ message: 'Server error during bulk chapter deletion.' });
+        // Optionally use next(error) if you have a central error handler
+        // next(error);
+    } finally {
+        // End the session
+        session.endSession();
+    }
+});
+// ---> CHANGE END <---
+
 
 // --- GET /api/novels/:novelId/chapters/:chapterId ---
 // @desc    Get a specific chapter's full details (including content)
@@ -87,17 +150,12 @@ router.get('/:chapterId', protect, async (req, res, next) => {
     const { novelId, chapterId } = req.params;
     const userId = req.user._id;
     try {
-        await verifyNovelOwnership(novelId, userId); // Verify novel ownership
-
+        await verifyNovelOwnership(novelId, userId); // No session needed for read-only
         const chapter = await Chapter.findOne({ _id: chapterId, novel: novelId });
-
         if (!chapter) {
             return res.status(404).json({ message: 'Chapter not found within this novel.' });
         }
-        // No need to check chapter.owner if novel ownership is confirmed
-
         res.status(200).json(chapter);
-
     } catch (error) {
         console.error(`Error fetching chapter ${chapterId} for novel ${novelId}:`, error);
         if (error.name === 'CastError') {
@@ -108,25 +166,24 @@ router.get('/:chapterId', protect, async (req, res, next) => {
 });
 
 // --- PUT /api/novels/:novelId/chapters/:chapterId ---
-// @desc    Update a specific chapter (title and content)
+// @desc    Update a specific chapter (title and content only, order not updatable here)
 // @access  Private
 router.put('/:chapterId', protect, async (req, res, next) => {
     const { novelId, chapterId } = req.params;
     const userId = req.user._id;
-    const { title, content } = req.body;
+    const { title, content } = req.body; // Only accept title and content
 
     // Basic Validation
-    if (!title || typeof title !== 'string' || title.trim() === '') {
-        return res.status(400).json({ message: 'Chapter title cannot be empty.' });
+    if (title !== undefined && (typeof title !== 'string' || title.trim() === '')) {
+        // Only validate title if it's actually being sent for update
+        return res.status(400).json({ message: 'Chapter title cannot be empty when provided.' });
     }
-    // Add validation for content if needed (e.g., check if it's a valid Slate structure)
-    if (content === undefined) {
-        return res.status(400).json({ message: 'Chapter content is required.' });
+    if (content === undefined && title === undefined) {
+        return res.status(400).json({ message: 'No update fields (title or content) provided.' });
     }
-
 
     try {
-        await verifyNovelOwnership(novelId, userId); // Verify novel ownership
+        await verifyNovelOwnership(novelId, userId); // No session needed if only updating one chapter
 
         const chapter = await Chapter.findOne({ _id: chapterId, novel: novelId });
 
@@ -134,9 +191,14 @@ router.put('/:chapterId', protect, async (req, res, next) => {
             return res.status(404).json({ message: 'Chapter not found.' });
         }
 
-        chapter.title = title.trim();
-        chapter.content = content; // Assume content is valid Slate JSON
-        // Mongoose automatically updates `updatedAt`
+        // Update only provided fields
+        if (title !== undefined) {
+            chapter.title = title.trim();
+        }
+        if (content !== undefined) {
+            chapter.content = content; // Assume content is valid Slate JSON
+        }
+        // chapter.order is NOT updated here
 
         const updatedChapter = await chapter.save(); // Mongoose validation runs here
 
@@ -155,107 +217,66 @@ router.put('/:chapterId', protect, async (req, res, next) => {
 });
 
 // --- DELETE /api/novels/:novelId/chapters/:chapterId ---
-// @desc    Delete a specific chapter
+// @desc    Delete a specific chapter and re-order subsequent ones
 // @access  Private
 router.delete('/:chapterId', protect, async (req, res, next) => {
     const { novelId, chapterId } = req.params;
     const userId = req.user._id;
+    // Optional: Use a transaction for atomicity
+    const session = await mongoose.startSession();
+    session.startTransaction();
     try {
-        const parentNovel = await verifyNovelOwnership(novelId, userId); // Verify ownership
-
-        const chapter = await Chapter.findOne({ _id: chapterId, novel: novelId });
-        if (!chapter) {
-            return res.status(404).json({ message: 'Chapter not found.' });
+        const parentNovel = await Novel.findOne({ _id: novelId, owner: userId }).session(session);
+        if (!parentNovel) {
+            throw new Error('Novel not found or not authorized.');
         }
 
-        // --- IMPORTANT: Remove chapter reference from Novel ---
-        parentNovel.chapters.pull(chapterId); // Mongoose helper to remove from array
-        // Consider re-ordering subsequent chapters *before* deleting
+        const chapter = await Chapter.findOne({ _id: chapterId, novel: novelId }).session(session);
+        if (!chapter) {
+            // Important: Abort transaction before sending response if chapter not found
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ message: 'Chapter not found.' });
+        }
         const deletedOrder = chapter.order;
-        await parentNovel.save();
-        // --- End Novel Update ---
+
+        // Remove chapter reference from Novel
+        parentNovel.chapters.pull(chapterId);
+        await parentNovel.save({ session });
 
         // Delete the chapter document itself
-        const deleteResult = await Chapter.deleteOne({ _id: chapterId });
+        const deleteResult = await Chapter.deleteOne({ _id: chapterId }).session(session);
         if (deleteResult.deletedCount === 0) {
             // Should not happen if findOne succeeded, but safety check
             throw new Error('Chapter deletion failed unexpectedly.');
         }
 
-        // --- Reorder subsequent chapters ---
+        // Reorder subsequent chapters
         await Chapter.updateMany(
             { novel: novelId, order: { $gt: deletedOrder } },
             { $inc: { order: -1 } } // Decrement order for all chapters after the deleted one
-        );
-        // --- End Reorder ---
+        ).session(session);
 
-        console.log(`Chapter ${chapterId} deleted from novel ${novelId}`);
+        // Commit Transaction
+        await session.commitTransaction();
+        console.log(`Chapter ${chapterId} deleted and subsequent chapters reordered for novel ${novelId}`);
         res.status(200).json({ message: 'Chapter successfully deleted.' });
 
     } catch (error) {
-        console.error(`Error deleting chapter ${chapterId}:`, error);
+        // Abort Transaction on Error
+        await session.abortTransaction();
+        console.error(`Error during chapter deletion transaction for chapter ${chapterId}:`, error);
+
         if (error.name === 'CastError') {
             return res.status(400).json({ message: 'Invalid ID format.' });
         }
-        next(error);
-    }
-});
+        // Send specific validation error messages or a generic one
+        res.status(500).json({ message: error.message || 'Server error during chapter deletion.' });
+        // No next(error) here as we handled the transaction and response
 
-// --- POST /api/novels/:novelId/chapters/reorder ---
-// @desc    Reorder chapters for a novel
-// @access  Private
-router.post('/reorder', protect, async (req, res, next) => {
-    const { novelId } = req.params;
-    const userId = req.user._id;
-    const { orderedChapterIds } = req.body; // Expect an array of chapter IDs in the new desired order
-
-    if (!Array.isArray(orderedChapterIds)) {
-        return res.status(400).json({ message: 'Invalid data format: orderedChapterIds must be an array.' });
-    }
-
-    try {
-        const parentNovel = await verifyNovelOwnership(novelId, userId); // Verify ownership
-
-        // Fetch all chapters to ensure we have the correct count and IDs
-        const currentChapters = await Chapter.find({ novel: novelId }).select('_id');
-        if (currentChapters.length !== orderedChapterIds.length) {
-            return res.status(400).json({ message: 'Mismatch in chapter count during reorder.' });
-        }
-        const currentIds = currentChapters.map(c => c._id.toString());
-        const receivedIds = new Set(orderedChapterIds);
-        if (!currentIds.every(id => receivedIds.has(id))) {
-            return res.status(400).json({ message: 'Mismatch in chapter IDs during reorder.' });
-        }
-
-
-        // --- Update Order using bulkWrite for efficiency ---
-        const bulkOps = orderedChapterIds.map((chapterId, index) => ({
-            updateOne: {
-                filter: { _id: chapterId, novel: novelId }, // Ensure chapter belongs to this novel
-                update: { $set: { order: index } } // Set new 0-based order
-            }
-        }));
-
-        if (bulkOps.length > 0) {
-            await Chapter.bulkWrite(bulkOps);
-        }
-        // --- End Update Order ---
-
-        // --- Update the novel's chapter array order ---
-        parentNovel.chapters = orderedChapterIds; // Overwrite with the new ordered IDs
-        await parentNovel.save();
-        // --- End Update Novel ---
-
-
-        console.log(`Chapters reordered for novel ${novelId}`);
-        res.status(200).json({ message: 'Chapters reordered successfully.' });
-
-    } catch (error) {
-        console.error(`Error reordering chapters for novel ${novelId}:`, error);
-        if (error.name === 'CastError') {
-            return res.status(400).json({ message: 'Invalid ID format.' });
-        }
-        next(error);
+    } finally {
+        // End Session
+        session.endSession();
     }
 });
 
