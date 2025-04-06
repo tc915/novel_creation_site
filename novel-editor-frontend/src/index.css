@@ -1,11 +1,11 @@
 /* src/index.css */
 
 /* --- Add Google Font Imports --- */
-@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Source+Code+Pro:wght@400&family=Lato:ital,wght@0,400;0,700;1,400&family=Merriweather:ital,wght@0,400;0,700;1,400&family=Lora:ital,wght@0,400;0,700;1,400&family=EB+Garamond:ital@0;1&family=Open+Sans:ital,wght@0,400;0,700;1,400&display=swap");
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Source+Code+Pro:wght@400&family=Lato:ital,wght@0,400;0,700;1,400&family=Merriweather:ital,wght@0,400;0,700;1,400&family=Lora:ital,wght@0,400;0,700;1,400&family=EB+Garamond:ital@0;1&family=Open+Sans:ital,wght@0,400;0,700;1,400&display=swap');
 /* --- End Font Imports --- */
 
 /* Import Tailwind v4 */
-@import "tailwindcss";
+@import 'tailwindcss';
 
 /* Define custom theme values */
 @theme {
@@ -30,9 +30,9 @@
     0 0 12px theme(colors.neon-lime / 50%);
 
   /* --- STEP 2: Define Font Families --- */
-  --font-display: "Orbitron", sans-serif; /* For headings and prominent text */
-  --font-body: "Open Sans", sans-serif; /* Using Orbitron also for body, or choose another like 'Exo' */
-  --font-mono: "Source Code Pro", monospace; /* For code/monospace sections */
+  --font-display: 'Orbitron', sans-serif; /* For headings and prominent text */
+  --font-body: 'Open Sans', sans-serif; /* Using Orbitron also for body, or choose another like 'Exo' */
+  --font-mono: 'Source Code Pro', monospace; /* For code/monospace sections */
 }
 
 /* --- STEP 3: Apply Base Font Styles --- */
@@ -63,9 +63,9 @@ h6 {
 /* ... (scrollbar styles from previous step) ... */
 
 /* Base styles for form inputs */
-input[type="email"],
-input[type="password"],
-input[type="text"] {
+input[type='email'],
+input[type='password'],
+input[type='text'] {
   @apply w-full px-3 py-2 bg-[var(--color-content-bg)] border border-[var(--color-border)] rounded text-[var(--color-text-base)] focus:outline-none placeholder:text-[var(--color-text-muted)];
   @apply focus:ring-2 focus:ring-[var(--color-neon-cyan)] focus:border-transparent;
   font-family: var(--font-body); /* Ensure inputs use body font */
@@ -82,10 +82,16 @@ label {
   @apply font-semibold rounded transition duration-200;
 }
 .btn-primary-cyan {
-  @apply bg-[var(--color-neon-cyan)] text-black hover:shadow-[var(--shadow-glow-cyan)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--color-cyber-bg)] focus:ring-[var(--color-neon-cyan)];
+  @apply inline-flex items-center justify-center font-semibold rounded-sm transition duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--color-cyber-bg)] shadow-[var(--shadow-subtle)] font-[var(--font-display)] uppercase tracking-[0.05em];
+  @apply bg-[var(--color-neon-cyan)] text-black hover:shadow-[var(--shadow-glow-cyan)] focus:ring-[var(--color-neon-cyan)];
 }
 .btn-primary-pink {
   @apply bg-[var(--color-neon-pink)] text-black hover:shadow-[var(--shadow-glow-pink)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--color-cyber-bg)] focus:ring-[var(--color-neon-pink)];
+}
+
+.btn-secondary-dark {
+  @apply inline-flex items-center justify-center font-semibold rounded-sm transition duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[var(--color-cyber-bg)] shadow-[var(--shadow-subtle)] font-[var(--font-display)] uppercase tracking-[0.05em];
+  @apply bg-[var(--color-content-bg)] text-[var(--color-text-base)] border border-[var(--color-border)] hover:bg-gray-700 hover:border-gray-500 focus:ring-[var(--color-neon-cyan)];
 }
 
 /* Specific overrides if needed */
@@ -93,7 +99,7 @@ label {
   font-family: var(--font-mono) !important; /* Ensure mono overrides */
 }
 
-[data-slate-placeholder="true"]::before {
+[data-slate-placeholder='true']::before {
   /* Target the ::before pseudo-element Slate uses */
   content: attr(data-placeholder); /* Use content attribute */
   @apply text-[var(--color-text-muted)] opacity-75 not-italic font-normal;
@@ -114,13 +120,13 @@ label {
 
 /* --- Add styles to hide number input spinners --- */
 /* Hide spin buttons on Chrome, Safari, Edge, Opera */
-input[type="number"]::-webkit-outer-spin-button,
-input[type="number"]::-webkit-inner-spin-button {
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
 /* Hide spin buttons on Firefox */
-input[type="number"] {
+input[type='number'] {
   -moz-appearance: textfield;
   appearance: inherit;
 }
@@ -157,3 +163,83 @@ input[type="number"] {
   background: var(--color-content-bg);
 }
 /* --- End Scrollbar Styling --- */
+
+/* --- Animated Border Styles (Multi-Gradient TECHNIQUE) --- */
+@property --angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes rotateBorder {
+  0% {
+    --angle: 0deg;
+  }
+  100% {
+    --angle: 360deg;
+  }
+}
+
+/* Style the ::before pseudo-element on the wrapper div */
+.animated-border-active::before {
+  content: '';
+  position: absolute;
+  /* ---> CHANGE START <--- */
+  /* Adjust horizontal inset to extend beyond parent */
+  top: -5px; /* Keep aligned vertically */
+  bottom: -5px; /* Keep aligned vertically */
+  left: -10px; /* Extend 5px to the left (adjust value as needed) */
+  right: -10px; /* Extend 5px to the right (adjust value as needed) */
+  /* inset: 0; */ /* Replaced with specific values above */
+  /* ---> CHANGE END <--- */
+
+  /* Match rounding of the input/textarea */
+  border-radius: 3px; /* Adjust to match your input's rounded-sm or other */
+  padding: 1px; /* THIS CONTROLS THE BORDER THICKNESS */
+  z-index: 0; /* Behind the input and label */
+
+  /* Layer 1: The animated gradient */
+  background: conic-gradient(
+    from var(--angle),
+    transparent 25%,
+    var(--color-neon-cyan),
+    var(--color-neon-pink),
+    var(--color-neon-cyan),
+    transparent 75%
+  );
+
+  /* Layer 2: Masking using the same background color as the input's parent */
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+
+  /* Define how the mask layers interact */
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+
+  /* Animation */
+  animation: rotateBorder 3.5s linear infinite; /* Adjust speed */
+
+  /* Fade in/out */
+  opacity: 1;
+  transition: opacity 0.3s ease-in-out;
+}
+
+/* Hide the effect when not active */
+div:not(.animated-border-active)::before {
+  opacity: 0;
+  transition: opacity 0.3s ease-in-out;
+}
+/* --- End Animated Border Styles --- */
+
+/* Helper class for visually hiding labels */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}

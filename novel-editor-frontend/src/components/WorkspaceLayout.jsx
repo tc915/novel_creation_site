@@ -1,40 +1,25 @@
 // ---> FILE: ./novel-editor-frontend/src/components/WorkspaceLayout.jsx <---
-
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Link,
-  Outlet,
+  Outlet, // Keep Outlet
   useLocation,
   useNavigate,
   useMatch
 } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
-
-// Icons
-const HomeIcon = () => <span>🏠</span>;
-const EditIcon = () => <span>📝</span>;
-const WorkbenchIcon = () => <span>🛠️</span>;
-const SettingsIcon = () => <span>⚙️</span>;
-// ---> CHANGE START <---
-const SaveIcon = () => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    fill="none"
-    viewBox="0 0 24 24"
-    strokeWidth={1.5}
-    stroke="currentColor"
-    className="w-4 h-4 mr-1"
-  >
-    {' '}
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      d="M16.5 3.75V16.5L12 14.25L7.5 16.5V3.75M16.5 3.75H7.5C6.4 3.75 5.5 4.65 5.5 5.75V20.25L12 17.25L18.5 20.25V5.75C18.5 4.65 17.6 3.75 16.5 3.75Z"
-    />{' '}
-  </svg>
-); // Simple save icon
-// ---> CHANGE END <---
+import PageTransitionWrapper from './PageTransitionWrapper'; // Import the wrapper
+// Assuming Icons.jsx exists and exports these icons
+import {
+  HomeIcon,
+  EditIcon,
+  WorkbenchIcon,
+  SettingsIcon,
+  SaveIcon,
+  PeopleIcon,
+  ArrowLeftIcon
+} from './Icons';
 
 function WorkspaceLayout() {
   const { logout, authState } = useAuth();
@@ -46,20 +31,14 @@ function WorkspaceLayout() {
   const [currentNovel, setCurrentNovel] = useState(null);
   const [isLoadingNovel, setIsLoadingNovel] = useState(false);
   const [fetchError, setFetchError] = useState('');
+  const [saveTrigger, setSaveTrigger] = useState(0);
   const backendUrl = 'http://localhost:5001';
 
-  // ---> CHANGE START <---
-  // State to trigger saves in child components
-  const [saveTrigger, setSaveTrigger] = useState(0);
-
-  // Function called by the header Save button
   const triggerSave = () => {
     console.log('Header Save Triggered');
-    setSaveTrigger((count) => count + 1); // Increment to trigger useEffect in children
+    setSaveTrigger((count) => count + 1);
   };
-  // ---> CHANGE END <---
 
-  // Callback to allow child routes to update the fetched novel data
   const updateCurrentNovelData = useCallback((updatedData) => {
     console.log(
       'WorkspaceLayout: Updating currentNovel state with:',
@@ -68,17 +47,17 @@ function WorkspaceLayout() {
     setCurrentNovel((prev) => ({ ...prev, ...updatedData }));
   }, []);
 
-  // Wrap fetchNovel in useCallback
   const fetchNovel = useCallback(
     async (id) => {
-      // Double check: Do not fetch if id is 'new' or invalid
       if (!id || id === 'new' || !authState.token) {
         console.log(
           `fetchNovel called with invalid id (${id}) or no token, returning.`
         );
+        setCurrentNovel(null); // Clear novel data if ID is invalid
+        setIsLoadingNovel(false);
+        setFetchError('');
         return;
       }
-
       console.log(`Layout fetching details for novel: ${id}`);
       setIsLoadingNovel(true);
       setFetchError('');
@@ -98,59 +77,60 @@ function WorkspaceLayout() {
           err.response?.data?.message || 'Failed to load novel details.'
         );
         setCurrentNovel(null);
-        if (err.response?.status === 404 || err.response?.status === 401) {
-          navigate('/workspace/novels', { replace: true });
-        }
+        // Removed automatic navigation on error
+        // if (err.response?.status === 404 || err.response?.status === 401) {
+        //     // navigate('/workspace/novels', { replace: true });
+        // }
       } finally {
         setIsLoadingNovel(false);
       }
     },
-    [authState.token, navigate]
-  );
+    [authState.token, backendUrl]
+  ); // Removed navigate from dependencies here
 
-  // Effect to Fetch Novel Details or handle 'new' case
   useEffect(() => {
+    // Fetch novel only if novelId exists and is not 'new'
     if (novelId && novelId !== 'new') {
       fetchNovel(novelId);
-    } else if (novelId === 'new') {
-      console.log("Layout detected 'new' novelId, clearing state.");
-      setCurrentNovel(null);
-      setFetchError('');
-      setIsLoadingNovel(false);
     } else {
+      // Clear state if no valid novelId is present
       setCurrentNovel(null);
-      setFetchError('');
-      setIsLoadingNovel(false);
+      setIsLoadingNovel(false); // Ensure loading state is false
+      setFetchError(''); // Clear any previous errors
+      if (novelId === 'new') {
+        console.log("Layout detected 'new' novelId, state cleared.");
+      }
     }
-  }, [novelId, fetchNovel]);
+  }, [novelId, fetchNovel]); // Depend on novelId and the fetchNovel callback
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
-  // Nav Items
-  const navItems = [
+  // Define base navigation items
+  const navItemsBase = [
+    { pathBase: '/novels', name: 'Novels', icon: HomeIcon, show: 'always' },
     {
-      path: '/workspace/novels',
-      name: 'Novels',
-      icon: HomeIcon,
-      show: 'always'
-    },
-    {
-      path: `/workspace/novel/${novelId}/editor`,
+      pathBase: '/editor',
       name: 'Editor',
       icon: EditIcon,
       show: 'novelSelected'
     },
     {
-      path: `/workspace/novel/${novelId}/workbench`,
+      pathBase: '/workbench',
       name: 'Workbench',
       icon: WorkbenchIcon,
       show: 'novelSelected'
     },
     {
-      path: `/workspace/novel/${novelId}/details`,
+      pathBase: '/characters',
+      name: 'Characters',
+      icon: PeopleIcon,
+      show: 'novelSelected'
+    }, // Changed Icon
+    {
+      pathBase: '/details',
       name: 'Details',
       icon: SettingsIcon,
       show: 'novelSelected'
@@ -166,29 +146,28 @@ function WorkspaceLayout() {
             ? 'Create New Novel'
             : novelId
             ? isLoadingNovel
-              ? 'Loading...'
-              : currentNovel?.title || 'Novel Details'
+              ? 'Loading Novel...' // More specific loading text
+              : currentNovel?.title || 'Novel Workspace' // Default to Workspace if title missing
             : 'Novel Workspace'}
         </h1>
         <div className="flex items-center space-x-2">
           <span className="text-xs mr-3 font-mono text-[var(--color-text-muted)] hidden md:inline">
             {authState.user?.name || authState.user?.email}
           </span>
-          {/* ---> CHANGE START <--- */}
-          {/* Replace Details Link with Save Button */}
-          {novelId && novelId !== 'new' && !isLoadingNovel && (
+          {/* Save button: Show only when a novel is loaded and not 'new' */}
+          {novelId && novelId !== 'new' && !isLoadingNovel && currentNovel && (
             <button
-              onClick={triggerSave} // Call the trigger function
-              className="btn-primary-cyan text-xs px-4 py-1.5 flex items-center" // Use button styles
+              onClick={triggerSave}
+              className="btn btn-primary-cyan text-xs px-4 py-1.5 flex items-center" // Ensure btn and btn-primary-cyan are defined
               title="Save current view (Details or Chapter)"
             >
-              <SaveIcon /> Save
+              <SaveIcon className="w-4 h-4" /> {/* Explicit size */}
+              <span className="ml-1">Save</span>
             </button>
           )}
-          {/* ---> CHANGE END <--- */}
           <button
             onClick={handleLogout}
-            className="bg-red-600 text-white text-xs px-3 py-1 ml-2 rounded hover:bg-red-700 transition font-[var(--font-display)]"
+            className="btn bg-red-600 text-white text-xs px-3 py-1.5 rounded hover:bg-red-700 transition" // Ensure btn is defined
           >
             Log Out
           </button>
@@ -199,76 +178,96 @@ function WorkspaceLayout() {
       <div className="flex-grow flex overflow-hidden">
         {/* Sidebar Navigation */}
         <aside className="w-20 flex-shrink-0 bg-gray-900/50 border-r border-[var(--color-border)] p-2 flex flex-col items-center space-y-4 overflow-y-auto">
-          {navItems.map((item) => {
+          {navItemsBase.map((item) => {
             const isNovelContextReady =
-              novelId && novelId !== 'new' && !isLoadingNovel;
+              novelId && novelId !== 'new' && !isLoadingNovel && currentNovel; // Check currentNovel exists
             let isDisabled = false;
-            let finalPath = item.path;
-            if (item.show === 'novelSelected') {
-              isDisabled = isLoadingNovel || novelId === 'new';
-              finalPath = isNovelContextReady
-                ? `/workspace/novel/${novelId}/${item.path.split('/').pop()}`
-                : '#';
-              if (!isNovelContextReady && novelId !== 'new') finalPath = '#';
-              if (novelId === 'new') return null;
+            let finalPath = '#'; // Default to '#'
+
+            if (item.show === 'always') {
+              finalPath = `/workspace${item.pathBase}`;
+            } else if (item.show === 'novelSelected') {
+              // Don't show novel-specific links for 'new' novel or if no novelId
+              if (!novelId || novelId === 'new') return null;
+              // Disable if loading novel context or if context isn't ready (novel fetch failed/null)
+              isDisabled = isLoadingNovel || !isNovelContextReady;
+              if (isNovelContextReady) {
+                finalPath = `/workspace/novel/${novelId}${item.pathBase}`;
+              }
+            } else {
+              return null; // Should not happen based on current items
             }
-            if (
-              item.show === 'always' ||
-              (item.show === 'novelSelected' && novelId && novelId !== 'new')
-            ) {
-              const isActive =
-                location.pathname === item.path ||
-                (location.pathname.startsWith(item.path) &&
-                  item.path !== '/workspace/novels');
-              return (
-                <Link
-                  key={item.name}
-                  to={isDisabled ? '#' : finalPath}
-                  title={item.name}
-                  aria-disabled={isDisabled}
-                  onClick={(e) => isDisabled && e.preventDefault()}
-                  className={`flex flex-col items-center p-2 rounded-md w-full transition duration-200 ${
-                    isActive
-                      ? 'bg-[var(--color-neon-pink)] text-black'
-                      : 'text-[var(--color-text-muted)] hover:bg-[var(--color-content-bg)] hover:text-[var(--color-neon-cyan)]'
-                  } ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  {' '}
-                  <item.icon className="w-5 h-5 mb-1" />{' '}
-                  <span className="text-[0.75rem] font-mono uppercase">
-                    {item.name}
-                  </span>{' '}
-                </Link>
-              );
-            }
-            return null;
+
+            // Determine active state more accurately
+            // Check if the current location pathname *exactly* matches the final path
+            // OR if it starts with the final path followed by a '/' (for detail pages like character/:id)
+            const isActive =
+              location.pathname === finalPath ||
+              location.pathname.startsWith(`${finalPath}/`);
+
+            return (
+              <Link
+                key={item.name}
+                to={isDisabled ? '#' : finalPath}
+                title={item.name}
+                aria-disabled={isDisabled || finalPath === '#'} // Disable if path is '#'
+                onClick={(e) =>
+                  (isDisabled || finalPath === '#') && e.preventDefault()
+                } // Prevent click if disabled or path is '#'
+                className={`flex flex-col items-center p-2 rounded-md w-full transition duration-200 ${
+                  isActive
+                    ? 'bg-[var(--color-neon-pink)] text-black' // Active style
+                    : 'text-[var(--color-text-muted)] hover:bg-[var(--color-content-bg)] hover:text-[var(--color-neon-cyan)]' // Default/Hover style
+                } ${
+                  isDisabled || finalPath === '#'
+                    ? 'opacity-50 cursor-not-allowed'
+                    : ''
+                }`} // Disabled style
+              >
+                <item.icon className="w-5 h-5 mb-1" />
+                <span className="text-[0.75rem] font-mono uppercase">
+                  {item.name}
+                </span>
+              </Link>
+            );
           })}
-          <div className="flex-grow"></div>
+          <div className="flex-grow"></div> {/* Spacer */}
           <Link
-            to="/"
+            to="/" // Link back to landing page
             title="Back to Landing"
             className="p-2 rounded-md w-full text-center text-[var(--color-text-muted)] hover:bg-[var(--color-content-bg)] hover:text-[var(--color-neon-cyan)]"
           >
-            {' '}
-            <span className="text-xl">‹</span>{' '}
+            {/* Use ArrowLeftIcon */}
+            <ArrowLeftIcon className="w-5 h-5 inline-block" />
           </Link>
         </aside>
 
-        {/* Content Area */}
-        <main className="flex-grow overflow-y-auto">
+        {/* Content Area - Make <main> relative */}
+        <main className="flex-grow overflow-y-auto relative">
+          {' '}
+          {/* ENSURE relative is present */}
           {fetchError && (
-            <div className="p-4 m-4 text-red-500">{fetchError}</div>
+            // Display fetch error prominently if it occurs
+            <div className="absolute inset-x-0 top-0 p-3 bg-red-900/80 text-red-200 text-sm text-center z-10">
+              {fetchError}
+            </div>
           )}
-          {/* Pass saveTrigger down */}
-          <Outlet
-            context={{
-              novelId,
-              currentNovel,
-              isLoadingNovel,
-              updateCurrentNovelData,
-              saveTrigger
-            }}
-          />
+          {/* Wrap the Outlet with the PageTransitionWrapper using mode="absolute" */}
+          <PageTransitionWrapper
+            mode="absolute"
+            key={location.pathname + '-nested'}
+          >
+            {/* Pass context down via Outlet */}
+            <Outlet
+              context={{
+                novelId,
+                currentNovel,
+                isLoadingNovel,
+                updateCurrentNovelData,
+                saveTrigger
+              }}
+            />
+          </PageTransitionWrapper>
         </main>
       </div>
     </div>

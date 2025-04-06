@@ -490,7 +490,7 @@ function NovelInfoFormPage() {
         </p>
       )}
 
-      <form onSubmit={handleSave} className="space-y-5">
+      <form onSubmit={handleSave} autoComplete="off" className="space-y-5">
         <div>
           {' '}
           <label htmlFor="title" className="form-label">
@@ -498,6 +498,7 @@ function NovelInfoFormPage() {
           </label>{' '}
           <input
             type="text"
+            autoComplete="off"
             id="title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}

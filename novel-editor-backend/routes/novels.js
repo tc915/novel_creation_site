@@ -5,6 +5,9 @@ const express = require('express');
 const router = express.Router();
 const Novel = require('../models/Novel');
 const Chapter = require('../models/Chapter'); // Import Chapter for delete cascade
+// ---> CHANGE START <---
+const Character = require('../models/Character'); // Import Character for delete cascade
+// ---> CHANGE END <---
 const { protect } = require('../middleware/authMiddleware');
 
 // --- GET /api/novels ---
@@ -31,7 +34,6 @@ router.post('/', protect, async (req, res) => {
 
         const { title, author, genres, description } = req.body;
 
-        // ---> CHANGE START <---
         // Validate incoming genres array structure (optional but good practice)
         let processedGenres = [];
         if (Array.isArray(genres)) {
@@ -50,16 +52,13 @@ router.post('/', protect, async (req, res) => {
                 return true;
             });
         }
-        // ---> CHANGE END <---
 
 
         const novelData = {
             title: title || undefined,
             owner: req.user._id,
             author: author?.trim() || req.user.name || '',
-            // ---> CHANGE START <---
             genres: processedGenres, // Use the processed array of objects
-            // ---> CHANGE END <---
             description: description?.trim() || '',
             // Schema defaults handle font settings
         };
@@ -129,7 +128,6 @@ router.put('/:id', protect, async (req, res) => {
     if (defaultFontFamily !== undefined) fieldsToUpdate.defaultFontFamily = defaultFontFamily.trim();
     if (defaultFontSize !== undefined) fieldsToUpdate.defaultFontSize = defaultFontSize.trim();
 
-    // ---> CHANGE START <---
     // Handle the genres array update specifically
     if (genres !== undefined) {
         // Validate incoming genres array structure
@@ -153,7 +151,6 @@ router.put('/:id', protect, async (req, res) => {
 
         fieldsToUpdate.genres = processedGenres; // Add the validated array to fieldsToUpdate
     }
-    // ---> CHANGE END <---
 
     if (Object.keys(fieldsToUpdate).length === 0) {
         return res.status(400).json({ message: 'No update fields provided.' });
@@ -195,11 +192,13 @@ router.put('/:id', protect, async (req, res) => {
 // @desc    Delete a novel owned by the user
 // @access  Private
 router.delete('/:id', protect, async (req, res) => {
+    const novelId = req.params.id;
+    const userId = req.user._id;
     try {
         // Find the novel first to ensure it exists and belongs to the user
         const novel = await Novel.findOne({
-            _id: req.params.id,
-            owner: req.user._id // Check ownership
+            _id: novelId,
+            owner: userId // Check ownership
         });
 
         if (!novel) {
@@ -208,23 +207,31 @@ router.delete('/:id', protect, async (req, res) => {
         }
 
         // Delete the novel itself
-        const result = await Novel.deleteOne({ _id: req.params.id, owner: req.user._id });
+        const result = await Novel.deleteOne({ _id: novelId, owner: userId });
 
         if (result.deletedCount === 0) {
             // Should not happen if findOne succeeded, but good check
             return res.status(404).json({ message: 'Novel not found or deletion failed.' });
         }
 
+        // ---> CHANGE START <---
         // Delete associated chapters
-        console.log(`Deleting chapters associated with novel ${req.params.id}`);
-        const chapterDeletionResult = await Chapter.deleteMany({ novel: req.params.id });
+        console.log(`Deleting chapters associated with novel ${novelId}`);
+        const chapterDeletionResult = await Chapter.deleteMany({ novel: novelId, owner: userId });
         console.log(`Deleted ${chapterDeletionResult.deletedCount} chapters.`);
 
-        console.log(`Novel ${req.params.id} deleted by user ${req.user._id}`);
-        res.status(200).json({ message: 'Novel successfully deleted.' });
+        // Delete associated characters
+        console.log(`Deleting characters associated with novel ${novelId}`);
+        const characterDeletionResult = await Character.deleteMany({ novel: novelId, owner: userId });
+        console.log(`Deleted ${characterDeletionResult.deletedCount} characters.`);
+        // ---> CHANGE END <---
+
+
+        console.log(`Novel ${novelId} deleted by user ${userId}`);
+        res.status(200).json({ message: 'Novel and all associated data successfully deleted.' }); // Updated message
 
     } catch (error) {
-        console.error(`Error deleting novel ${req.params.id}:`, error);
+        console.error(`Error deleting novel ${novelId}:`, error);
         if (error.name === 'CastError') {
             return res.status(400).json({ message: 'Invalid novel ID format.' });
         }
@@ -235,5 +242,12 @@ router.delete('/:id', protect, async (req, res) => {
 // --- Mount Chapter Routes ---
 const chapterRouter = require('./chapters');
 router.use('/:novelId/chapters', chapterRouter);
+
+// ---> CHANGE START <---
+// --- Mount Character Routes ---
+const characterRouter = require('./characters_api'); // Use the new file
+router.use('/:novelId/characters', characterRouter); // Mount under /novels/:novelId/characters
+// ---> CHANGE END <---
+
 
 module.exports = router;
