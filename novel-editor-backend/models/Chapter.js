@@ -2,7 +2,7 @@
 const mongoose = require('mongoose');
 
 // Define initial empty content for Slate
-const initialSlateContent = [ { type: 'paragraph', children: [{ text: '' }], } ];
+const initialSlateContent = [{ type: 'paragraph', children: [{ text: '' }], }];
 
 const chapterSchema = new mongoose.Schema(
   {
